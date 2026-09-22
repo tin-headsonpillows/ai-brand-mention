@@ -1,4 +1,4 @@
-import { getOpenAIClient } from "./openai";
+import { createChatCompletion } from "./execute";
 import { mockVariations } from "./mock";
 
 interface VariationsResponse {
@@ -13,7 +13,6 @@ export async function generateVariations(
 ): Promise<string[]> {
   if (mock) return mockVariations(seedPrompt, count);
 
-  const client = getOpenAIClient();
   const system = [
     "You are helping test how an AI assistant answers a family of related, realistic user questions.",
     `Given one example question, generate exactly ${count} DIFFERENT ways real people might ask about the same underlying need.`,
@@ -22,7 +21,7 @@ export async function generateVariations(
     `Return ONLY a JSON object of the shape {"variations": string[]} with exactly ${count} items, no commentary.`,
   ].join(" ");
 
-  const completion = await client.chat.completions.create({
+  const completion = await createChatCompletion({
     model,
     messages: [
       { role: "system", content: system },
