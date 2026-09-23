@@ -6,7 +6,16 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { StatTile } from "@/components/StatTile";
 import { MentionRateChart, type MentionRateRow } from "@/components/MentionRateChart";
 import { ResponseExplorer } from "@/components/ResponseExplorer";
-import type { AnalysisSummary, AnalyzeRequestBody, PromptResult, StreamEvent } from "@/lib/types";
+import { BusinessLeaderboard } from "@/components/BusinessLeaderboard";
+import { SerpComparisonView } from "@/components/SerpComparisonView";
+import type {
+  AnalysisSummary,
+  AnalyzeRequestBody,
+  Leaderboard,
+  PromptResult,
+  SerpComparison,
+  StreamEvent,
+} from "@/lib/types";
 import { splitList } from "@/lib/mentions";
 
 interface RunState {
@@ -16,6 +25,9 @@ interface RunState {
   completed: number;
   results: PromptResult[];
   summary: AnalysisSummary | null;
+  leaderboard: Leaderboard | null;
+  yourBrandRank: number | null;
+  serpComparison: SerpComparison | null;
   error: string | null;
   brand: string;
   competitors: string[];
@@ -28,6 +40,9 @@ const initialState: RunState = {
   completed: 0,
   results: [],
   summary: null,
+  leaderboard: null,
+  yourBrandRank: null,
+  serpComparison: null,
   error: null,
   brand: "",
   competitors: [],
@@ -117,6 +132,10 @@ export default function Home() {
             };
           case "summary":
             return { ...s, summary: event.summary, statusMessage: "Done." };
+          case "leaderboard":
+            return { ...s, leaderboard: event.leaderboard, yourBrandRank: event.yourBrandRank };
+          case "serp":
+            return { ...s, serpComparison: event.comparison };
           case "error":
             return { ...s, error: event.message };
           default:
@@ -201,6 +220,16 @@ export default function Home() {
           ) : null}
         </>
       ) : null}
+
+      {state.leaderboard ? (
+        <BusinessLeaderboard
+          leaderboard={state.leaderboard}
+          yourBrandRank={state.yourBrandRank}
+          brand={state.brand}
+        />
+      ) : null}
+
+      {state.serpComparison ? <SerpComparisonView comparison={state.serpComparison} /> : null}
 
       {state.results.length > 0 ? (
         <ResponseExplorer results={state.results} brand={state.brand} competitors={state.competitors} />

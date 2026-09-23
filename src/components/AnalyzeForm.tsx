@@ -23,6 +23,8 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
   const [variationCount, setVariationCount] = useState(100);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [model, setModel] = useState("");
+  const [location, setLocation] = useState("");
+  const [localSearchQuery, setLocalSearchQuery] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,6 +36,8 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
       competitors: competitors.trim() || undefined,
       variationCount,
       model: model.trim() || undefined,
+      location: location.trim() || undefined,
+      localSearchQuery: localSearchQuery.trim() || undefined,
     });
   }
 
@@ -130,22 +134,55 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
         </p>
       </div>
 
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="location" className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+          Location <span style={{ color: "var(--text-muted)" }}>(optional, enables Google local comparison)</span>
+        </label>
+        <input
+          id="location"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="e.g. Da Nang, Vietnam"
+          className="rounded border px-3 py-2 text-sm outline-none"
+          style={inputStyle}
+        />
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+          When set, we fetch Google Local &amp; Maps results for this location and compare them against businesses
+          ChatGPT mentioned.
+        </p>
+      </div>
+
       <details open={showAdvanced} onToggle={(e) => setShowAdvanced(e.currentTarget.open)}>
         <summary className="cursor-pointer text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
           Advanced options
         </summary>
-        <div className="mt-2 flex flex-col gap-1.5">
-          <label htmlFor="model" className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
-            Model override
-          </label>
-          <input
-            id="model"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="defaults to gpt-4o-mini (or OPENAI_MODEL)"
-            className="rounded border px-3 py-2 text-sm outline-none"
-            style={inputStyle}
-          />
+        <div className="mt-2 flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="model" className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+              Model override
+            </label>
+            <input
+              id="model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="defaults to gpt-4o-mini (or OPENAI_MODEL)"
+              className="rounded border px-3 py-2 text-sm outline-none"
+              style={inputStyle}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="localSearchQuery" className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+              Local search query override
+            </label>
+            <input
+              id="localSearchQuery"
+              value={localSearchQuery}
+              onChange={(e) => setLocalSearchQuery(e.target.value)}
+              placeholder="defaults to the example prompt above"
+              className="rounded border px-3 py-2 text-sm outline-none"
+              style={inputStyle}
+            />
+          </div>
         </div>
       </details>
 

@@ -9,8 +9,10 @@ tool will:
 3. Count how often your brand (and, optionally, named competitors) actually
    gets mentioned in those answers.
 4. Show the results on a live dashboard: mention rate, total mentions, a
-   brand-vs-competitor comparison chart, and every individual prompt/response
-   pair with the mentions highlighted.
+   brand-vs-competitor comparison chart, every individual prompt/response
+   pair with the mentions highlighted, a leaderboard of every business
+   ChatGPT mentioned (with your rank among them), and - if you set a location
+   - a comparison against Google's local pack via SerpApi.
 
 ## Getting started
 
@@ -35,6 +37,7 @@ can try out the whole flow and dashboard without any API access or cost. A
 |---|---|---|---|
 | `OPENAI_API_KEY` | For real runs | - | Your OpenAI API key. Without it, the app uses mock mode. |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | Chat model used both to generate prompt variations and to answer them. Can be overridden per-run in the UI's "Advanced options". |
+| `SERPAPI_API_KEY` | For real local comparisons | - | Enables the "ChatGPT vs. Google local results" section when a Location is set. Without it, that section still renders using simulated local results. |
 
 ## How it works
 
@@ -50,6 +53,18 @@ can try out the whole flow and dashboard without any API access or cost. A
 - The dashboard (`src/app/page.tsx` + `src/components/*`) consumes that
   stream live, so you see prompts complete and stats update as the run
   progresses. Use "Stop" to cancel a run early.
+- `src/lib/leaderboard.ts` re-reads all responses (batched, then
+  consolidated) to extract every business mentioned - not just your named
+  brand/competitors - and ranks them so you can see where you land among
+  the full field.
+- `src/lib/serpapi.ts` + `src/lib/compare.ts` fetch Google Local & Google
+  Maps results for the location you set and categorize each business as
+  mentioned by both ChatGPT and the local pack, ChatGPT only, or the local
+  pack only - the same "gap signal" framing used in manual GEO visibility
+  audits.
+- The UI font is Euclid Circular A, self-hosted via `next/font/local` from
+  `src/fonts/euclid-circular-a/` (bring your own licensed copy of the font
+  files if you fork this).
 
 ## Cost & rate limits
 

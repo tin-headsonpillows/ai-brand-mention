@@ -5,6 +5,8 @@ export interface AnalyzeRequestBody {
   competitors?: string;
   variationCount?: number;
   model?: string;
+  location?: string;
+  localSearchQuery?: string;
 }
 
 export interface PromptResult {
@@ -37,9 +39,50 @@ export interface AnalysisSummary {
   mock: boolean;
 }
 
+export interface LeaderboardEntry {
+  name: string;
+  mentionCount: number;
+  mentionedInIndexes: number[];
+}
+
+export interface Leaderboard {
+  entries: LeaderboardEntry[];
+  totalPromptsAnalyzed: number;
+}
+
+export interface SerpLocalResult {
+  name: string;
+  rating: number | null;
+  reviews: number | null;
+  address: string | null;
+  position: number | null;
+  source: "google_local" | "google_maps";
+}
+
+export type MatchCategory = "both" | "ai_only" | "serp_only";
+
+export interface ComparisonRow {
+  name: string;
+  aiMentionCount: number | null;
+  serpRating: number | null;
+  serpReviews: number | null;
+  serpPosition: number | null;
+  category: MatchCategory;
+}
+
+export interface SerpComparison {
+  configured: boolean;
+  mock: boolean;
+  location: string;
+  query: string;
+  rows: ComparisonRow[];
+}
+
 export type StreamEvent =
-  | { type: "status"; stage: "generating" | "executing"; message: string }
+  | { type: "status"; stage: "generating" | "executing" | "aggregating" | "serp"; message: string }
   | { type: "variations"; variations: string[] }
   | { type: "result"; result: PromptResult; completed: number; total: number }
   | { type: "summary"; summary: AnalysisSummary }
+  | { type: "leaderboard"; leaderboard: Leaderboard; yourBrandRank: number | null }
+  | { type: "serp"; comparison: SerpComparison }
   | { type: "error"; message: string };
