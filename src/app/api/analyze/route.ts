@@ -40,7 +40,9 @@ export async function POST(req: NextRequest) {
   const competitors = splitList(body.competitors);
   const variationCount = clamp(body.variationCount ?? MAX_VARIATIONS, MIN_VARIATIONS, MAX_VARIATIONS);
   const model = body.model?.trim() || DEFAULT_MODEL;
-  const mock = isMockMode();
+  const openaiApiKey = body.openaiApiKey?.trim() || undefined;
+  const serpApiKey = body.serpApiKey?.trim() || undefined;
+  const mock = isMockMode(openaiApiKey);
   const location = body.location?.trim() || "";
   const localSearchQuery = body.localSearchQuery?.trim() || seedPrompt;
 
@@ -66,11 +68,11 @@ export async function POST(req: NextRequest) {
           type: "status",
           stage: "generating",
           message: mock
-            ? "Mock mode (no OPENAI_API_KEY set) - generating simulated prompt variations..."
+            ? "Mock mode (no OpenAI API key provided) - generating simulated prompt variations..."
             : `Asking ChatGPT to generate ${variationCount} similar prompts...`,
         });
 
-        const variations = await generateVariations(seedPrompt, variationCount, model, mock);
+        const variations = await generateVariations(seedPrompt, variationCount, model, mock, openaiApiKey);
         if (aborted) return;
         send({ type: "variations", variations });
 
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
             try {
               const response = mock
                 ? mockChatResponse(prompt, brand, competitors, index)
-                : await askChatGPT(prompt, model);
+                : await askChatGPT(prompt, model, openaiApiKey);
               const brandCount = countMentionsAny(response, brandTerms);
               const competitorCounts: Record<string, number> = {};
               for (const name of competitors) {
@@ -138,7 +140,7 @@ export async function POST(req: NextRequest) {
             ? "Building the business leaderboard (mock mode)..."
             : "Re-reading responses to find every business mentioned...",
         });
-        const leaderboard = await buildLeaderboard(results, model, mock);
+        const leaderboard = await buildLeaderboard(results, model, mock, openaiApiKey);
         if (aborted) return;
         const yourBrandRank = findBrandRank(leaderboard, brandTerms);
         send({ type: "leaderboard", leaderboard, yourBrandRank });
@@ -147,12 +149,12 @@ export async function POST(req: NextRequest) {
           send({
             type: "status",
             stage: "serp",
-            message: isSerpConfigured()
+            message: isSerpConfigured(serpApiKey)
               ? "Fetching Google local & maps results for comparison..."
-              : "Simulating local search results (SERPAPI_API_KEY not set)...",
+              : "Simulating local search results (no SerpApi key provided)...",
           });
           try {
-            const comparison = await buildSerpComparison(leaderboard, localSearchQuery, location);
+            const comparison = await buildSerpComparison(leaderboard, localSearchQuery, location, serpApiKey);
             if (aborted) return;
             send({ type: "serp", comparison });
           } catch (err) {
@@ -189,10 +191,11 @@ export async function POST(req: NextRequest) {
 async function buildSerpComparison(
   leaderboard: Awaited<ReturnType<typeof buildLeaderboard>>,
   query: string,
-  location: string
+  location: string,
+  apiKey?: string
 ): Promise<SerpComparison> {
-  const configured = isSerpConfigured();
-  const localResults = configured ? await fetchLocalResults(query, location) : mockLocalResults();
+  const configured = isSerpConfigured(apiKey);
+  const localResults = configured ? await fetchLocalResults(query, location, apiKey) : mockLocalResults();
   const rows = compareAiAndSerp(leaderboard.entries, localResults);
   return { configured, mock: !configured, location, query, rows };
 }

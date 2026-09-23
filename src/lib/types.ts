@@ -7,6 +7,10 @@ export interface AnalyzeRequestBody {
   model?: string;
   location?: string;
   localSearchQuery?: string;
+  /** Bring-your-own key: used only for this request, never logged or persisted server-side. */
+  openaiApiKey?: string;
+  /** Bring-your-own key: used only for this request, never logged or persisted server-side. */
+  serpApiKey?: string;
 }
 
 export interface PromptResult {

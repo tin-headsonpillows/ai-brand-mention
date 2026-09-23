@@ -25,6 +25,10 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
   const [model, setModel] = useState("");
   const [location, setLocation] = useState("");
   const [localSearchQuery, setLocalSearchQuery] = useState("");
+  // Deliberately plain component state - never written to localStorage, sessionStorage,
+  // or cookies, so these are wiped whenever the page reloads and must be re-entered.
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [serpApiKey, setSerpApiKey] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,6 +42,8 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
       model: model.trim() || undefined,
       location: location.trim() || undefined,
       localSearchQuery: localSearchQuery.trim() || undefined,
+      openaiApiKey: openaiApiKey.trim() || undefined,
+      serpApiKey: serpApiKey.trim() || undefined,
     });
   }
 
@@ -47,6 +53,53 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
       className="flex flex-col gap-4 rounded-lg border p-4"
       style={{ borderColor: "var(--border-hairline)", background: "var(--surface-1)" }}
     >
+      <div
+        className="flex flex-col gap-3 rounded-lg border p-3"
+        style={{ borderColor: "var(--border-hairline)", background: "var(--page-plane)" }}
+      >
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            Your API keys
+          </span>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            Kept in your browser for this session only - sent directly with each request, never stored on our
+            server, and cleared when you reload the page. Re-enter them each time you come back.
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="openaiApiKey" className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+              OpenAI API key <span style={{ color: "var(--text-muted)" }}>(optional)</span>
+            </label>
+            <input
+              id="openaiApiKey"
+              type="password"
+              autoComplete="off"
+              value={openaiApiKey}
+              onChange={(e) => setOpenaiApiKey(e.target.value)}
+              placeholder="sk-... (falls back to mock mode if empty)"
+              className="rounded border px-3 py-2 text-sm outline-none"
+              style={inputStyle}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="serpApiKey" className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+              SerpApi key <span style={{ color: "var(--text-muted)" }}>(optional)</span>
+            </label>
+            <input
+              id="serpApiKey"
+              type="password"
+              autoComplete="off"
+              value={serpApiKey}
+              onChange={(e) => setSerpApiKey(e.target.value)}
+              placeholder="only needed for local results comparison"
+              className="rounded border px-3 py-2 text-sm outline-none"
+              style={inputStyle}
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-1.5">
         <label htmlFor="seedPrompt" className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
           Example prompt

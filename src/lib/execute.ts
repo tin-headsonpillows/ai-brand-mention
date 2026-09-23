@@ -25,8 +25,8 @@ function extractUnsupportedParam(err: unknown): string | null {
   return match?.[1] ?? null;
 }
 
-async function createChatCompletion(params: ChatParams, attempts = 4): Promise<ChatCompletion> {
-  const client = getOpenAIClient();
+async function createChatCompletion(params: ChatParams, apiKey?: string, attempts = 4): Promise<ChatCompletion> {
+  const client = getOpenAIClient(apiKey);
   let current = { ...params } as Record<string, unknown>;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -48,13 +48,16 @@ async function createChatCompletion(params: ChatParams, attempts = 4): Promise<C
 }
 
 /** Asks ChatGPT the given prompt, adapting to model-specific parameter quirks. */
-export async function askChatGPT(prompt: string, model: string): Promise<string> {
-  const completion = await createChatCompletion({
-    model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-    max_tokens: 500,
-  });
+export async function askChatGPT(prompt: string, model: string, apiKey?: string): Promise<string> {
+  const completion = await createChatCompletion(
+    {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_tokens: 500,
+    },
+    apiKey
+  );
   return completion.choices[0]?.message?.content?.trim() ?? "";
 }
 

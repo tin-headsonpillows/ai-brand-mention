@@ -26,10 +26,25 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Mock mode
 
-If `OPENAI_API_KEY` is not set, the app runs entirely in **mock mode**: it
-generates simulated prompt variations and simulated responses locally so you
-can try out the whole flow and dashboard without any API access or cost. A
-"mock mode" note appears in the results when this is active.
+If neither a server-configured `OPENAI_API_KEY` nor a visitor-supplied key
+(see below) is present, the app runs entirely in **mock mode**: it generates
+simulated prompt variations and simulated responses locally so you can try
+out the whole flow and dashboard without any API access or cost. A "mock
+mode" note appears in the results when this is active.
+
+### Bring-your-own keys
+
+The form also has "Your API keys" fields for OpenAI and SerpApi. These are
+meant for visitors to use the tool with their own accounts instead of the
+deployer's:
+
+- Kept only in browser memory (plain React state) - never written to
+  localStorage, sessionStorage, or cookies, so they're gone on every reload
+  and must be re-entered each time.
+- Sent with the request body over HTTPS and used only for that single
+  request; the server never logs or persists them.
+- Take priority over the server's `OPENAI_API_KEY` / `SERPAPI_API_KEY` env
+  vars when provided, so a visitor's own key overrides the deployer's.
 
 ## Configuration
 

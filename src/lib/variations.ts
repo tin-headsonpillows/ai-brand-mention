@@ -9,7 +9,8 @@ export async function generateVariations(
   seedPrompt: string,
   count: number,
   model: string,
-  mock: boolean
+  mock: boolean,
+  apiKey?: string
 ): Promise<string[]> {
   if (mock) return mockVariations(seedPrompt, count);
 
@@ -21,15 +22,18 @@ export async function generateVariations(
     `Return ONLY a JSON object of the shape {"variations": string[]} with exactly ${count} items, no commentary.`,
   ].join(" ");
 
-  const completion = await createChatCompletion({
-    model,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: `Example question: "${seedPrompt}"` },
-    ],
-    response_format: { type: "json_object" },
-    temperature: 0.9,
-  });
+  const completion = await createChatCompletion(
+    {
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: `Example question: "${seedPrompt}"` },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.9,
+    },
+    apiKey
+  );
 
   const raw = completion.choices[0]?.message?.content ?? "{}";
   let parsed: VariationsResponse;

@@ -2,8 +2,8 @@ import type { SerpLocalResult } from "./types";
 
 const SERPAPI_BASE_URL = "https://serpapi.com/search.json";
 
-export function isSerpConfigured(): boolean {
-  return !!process.env.SERPAPI_API_KEY;
+export function isSerpConfigured(userApiKey?: string): boolean {
+  return !!userApiKey?.trim() || !!process.env.SERPAPI_API_KEY;
 }
 
 interface RawLocalResult {
@@ -27,9 +27,10 @@ function normalizeLocalResults(raw: RawLocalResult[] | undefined): RawLocalResul
 async function fetchSerpEngine(
   engine: "google_local" | "google_maps",
   query: string,
-  location: string
+  location: string,
+  userApiKey?: string
 ): Promise<SerpLocalResult[]> {
-  const apiKey = process.env.SERPAPI_API_KEY;
+  const apiKey = userApiKey?.trim() || process.env.SERPAPI_API_KEY;
   if (!apiKey) return [];
 
   const params = new URLSearchParams({ engine, q: query, api_key: apiKey, hl: "en" });
@@ -65,10 +66,10 @@ async function fetchSerpEngine(
 }
 
 /** Fetches and merges Google Local + Google Maps results for a query/location, deduping by name. */
-export async function fetchLocalResults(query: string, location: string): Promise<SerpLocalResult[]> {
+export async function fetchLocalResults(query: string, location: string, apiKey?: string): Promise<SerpLocalResult[]> {
   const [local, maps] = await Promise.all([
-    fetchSerpEngine("google_local", query, location).catch(() => [] as SerpLocalResult[]),
-    fetchSerpEngine("google_maps", query, location).catch(() => [] as SerpLocalResult[]),
+    fetchSerpEngine("google_local", query, location, apiKey).catch(() => [] as SerpLocalResult[]),
+    fetchSerpEngine("google_maps", query, location, apiKey).catch(() => [] as SerpLocalResult[]),
   ]);
   return dedupe([...local, ...maps]);
 }

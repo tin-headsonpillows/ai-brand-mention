@@ -31,6 +31,7 @@ interface RunState {
   error: string | null;
   brand: string;
   competitors: string[];
+  expectsSerp: boolean;
 }
 
 const initialState: RunState = {
@@ -46,6 +47,7 @@ const initialState: RunState = {
   error: null,
   brand: "",
   competitors: [],
+  expectsSerp: false,
 };
 
 export default function Home() {
@@ -66,6 +68,7 @@ export default function Home() {
       statusMessage: "Starting...",
       brand: body.brand,
       competitors: splitList(body.competitors),
+      expectsSerp: Boolean(body.location?.trim()),
     });
 
     try {
@@ -133,9 +136,14 @@ export default function Home() {
           case "summary":
             return { ...s, summary: event.summary, statusMessage: "Done." };
           case "leaderboard":
-            return { ...s, leaderboard: event.leaderboard, yourBrandRank: event.yourBrandRank };
+            return {
+              ...s,
+              leaderboard: event.leaderboard,
+              yourBrandRank: event.yourBrandRank,
+              statusMessage: s.expectsSerp ? s.statusMessage : "Done.",
+            };
           case "serp":
-            return { ...s, serpComparison: event.comparison };
+            return { ...s, serpComparison: event.comparison, statusMessage: "Done." };
           case "error":
             return { ...s, error: event.message };
           default:

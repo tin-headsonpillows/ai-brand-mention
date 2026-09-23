@@ -20,7 +20,8 @@ interface ConsolidationResult {
 export async function buildLeaderboard(
   results: PromptResult[],
   model: string,
-  mock: boolean
+  mock: boolean,
+  apiKey?: string
 ): Promise<Leaderboard> {
   const usable = results.filter((r) => !r.error && r.response.trim());
   if (usable.length === 0) return { entries: [], totalPromptsAnalyzed: 0 };
@@ -36,19 +37,22 @@ export async function buildLeaderboard(
     const listing = chunk.map((r) => `[${r.index}] ${r.response}`).join("\n\n");
     let parsed: ChunkExtraction;
     try {
-      const completion = await createChatCompletion({
-        model,
-        messages: [
-          {
-            role: "system",
-            content:
-              'You extract every distinct business/brand/place name that is recommended or mentioned as an option in a set of numbered AI assistant responses. Return ONLY JSON: {"businesses": [{"name": string, "responseIndexes": number[]}]}. Use each response\'s bracketed number as its index. Group re-mentions of the exact same business within this batch under one name, but never merge different businesses together.',
-          },
-          { role: "user", content: listing },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0,
-      });
+      const completion = await createChatCompletion(
+        {
+          model,
+          messages: [
+            {
+              role: "system",
+              content:
+                'You extract every distinct business/brand/place name that is recommended or mentioned as an option in a set of numbered AI assistant responses. Return ONLY JSON: {"businesses": [{"name": string, "responseIndexes": number[]}]}. Use each response\'s bracketed number as its index. Group re-mentions of the exact same business within this batch under one name, but never merge different businesses together.',
+            },
+            { role: "user", content: listing },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0,
+        },
+        apiKey
+      );
       parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as ChunkExtraction;
     } catch {
       continue; // skip a malformed/failed chunk rather than failing the whole leaderboard
@@ -64,30 +68,34 @@ export async function buildLeaderboard(
 
   if (rawEntries.length === 0) return { entries: [], totalPromptsAnalyzed: usable.length };
 
-  const entries = await consolidate(rawEntries, model);
+  const entries = await consolidate(rawEntries, model, apiKey);
   return { entries, totalPromptsAnalyzed: usable.length };
 }
 
 async function consolidate(
   rawEntries: Array<{ name: string; indexes: number[] }>,
-  model: string
+  model: string,
+  apiKey?: string
 ): Promise<LeaderboardEntry[]> {
   const listing = rawEntries.map((e, i) => `${i}. "${e.name}" -> responses [${e.indexes.join(", ")}]`).join("\n");
 
   try {
-    const completion = await createChatCompletion({
-      model,
-      messages: [
-        {
-          role: "system",
-          content:
-            'You are deduplicating a list of business/brand mentions extracted from many AI responses. Several list entries may refer to the same real business under slightly different names or phrasing (e.g. "Furama Resort" and "Furama Resort Danang"). Merge those into one canonical entry, unioning their response index lists. Never merge genuinely different businesses. Return ONLY JSON: {"leaderboard": [{"canonicalName": string, "mentionedIn": number[]}]}.',
-        },
-        { role: "user", content: listing },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0,
-    });
+    const completion = await createChatCompletion(
+      {
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              'You are deduplicating a list of business/brand mentions extracted from many AI responses. Several list entries may refer to the same real business under slightly different names or phrasing (e.g. "Furama Resort" and "Furama Resort Danang"). Merge those into one canonical entry, unioning their response index lists. Never merge genuinely different businesses. Return ONLY JSON: {"leaderboard": [{"canonicalName": string, "mentionedIn": number[]}]}.',
+          },
+          { role: "user", content: listing },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0,
+      },
+      apiKey
+    );
     const parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as ConsolidationResult;
     const list = parsed.leaderboard;
     if (!Array.isArray(list) || list.length === 0) return rawFallback(rawEntries);
