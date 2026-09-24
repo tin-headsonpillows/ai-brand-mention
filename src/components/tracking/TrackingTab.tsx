@@ -9,7 +9,9 @@ import {
   computeSubjectSeries,
   computeSurfaceSplit,
   createHitLookup,
+  domainMatchesWebsite,
   filterByRange,
+  guessSiteName,
   summarizeSeries,
   type AiSurface,
   type SurfaceFilter,
@@ -151,8 +153,12 @@ export function TrackingTab() {
   const summaries = useMemo(() => summarizeSeries(series), [series]);
   const surfaceSplit = useMemo(() => (surface === "all" && subjects.length > 0 ? computeSurfaceSplit(ranged, hits) : null), [surface, ranged, hits, subjects]);
   const domains = useMemo(
-    () => (config ? computeDomainRows(ranged, subjects, config.excludedDomains, surface) : { rows: [], hiddenCount: 0 }),
+    () => (config ? computeDomainRows(ranged, subjects, config.excludedDomains, surface) : []),
     [ranged, subjects, config, surface]
+  );
+  const allDomains = useMemo(
+    () => (config ? computeDomainRows(histories, subjects, config.excludedDomains, "all") : []),
+    [histories, subjects, config]
   );
   const aiSurfaces: AiSurface[] = surface === "all" ? ["aiOverview", "aiMode"] : surface === "organic" ? [] : [surface];
 
@@ -176,6 +182,23 @@ export function TrackingTab() {
   const excludeDomain = (domain: string) => {
     if (config.excludedDomains.includes(domain)) return;
     saveConfig({ ...config, excludedDomains: [...config.excludedDomains, domain] });
+  };
+
+  const unexcludeDomain = (domain: string) => {
+    saveConfig({ ...config, excludedDomains: config.excludedDomains.filter((d) => d !== domain) });
+  };
+
+  const trackDomain = (domain: string) => {
+    if (subjects.some((s) => domainMatchesWebsite(domain, s.website))) return;
+    const name = allDomains.find((r) => r.domain === domain)?.siteName ?? guessSiteName(domain, []);
+    saveConfig({
+      ...config,
+      competitors: [
+        ...config.competitors.filter((c) => c.name.trim() || c.website.trim()),
+        { id: crypto.randomUUID(), name, aliases: [], website: domain },
+      ],
+    });
+    setStatusMessage(`Now tracking ${name} (${domain}) as a competitor - rename it or add aliases in Settings.`);
   };
 
   return (
@@ -281,7 +304,14 @@ export function TrackingTab() {
       ) : null}
 
       {view === "settings" ? (
-        <SettingsView config={config} onDraftChange={setConfig} onSave={saveConfig} />
+        <SettingsView
+          config={config}
+          onDraftChange={setConfig}
+          onSave={saveConfig}
+          suggestions={allDomains.filter((r) => !r.owner)}
+          onTrack={trackDomain}
+          onExclude={excludeDomain}
+        />
       ) : needsSetup && !hasData ? (
         <EmptyState
           title="Set up tracking"
@@ -324,21 +354,31 @@ export function TrackingTab() {
           periodLabel={periodLabel}
         />
       ) : view === "rank" ? (
-        <RankTrackerView histories={ranged} subjects={subjects} hits={hits} localeLabel={localeLabel} />
+        <RankTrackerView histories={ranged} subjects={subjects} hits={hits} localeLabel={localeLabel} onTrack={trackDomain} />
       ) : view === "mentions" ? (
         <MentionsView
           dates={dates}
           series={series}
-          domainRows={domains.rows}
-          hiddenCount={domains.hiddenCount}
+          domainRows={domains}
           compare={compare}
           onCompareChange={setCompare}
           onExclude={excludeDomain}
+          onUnexclude={unexcludeDomain}
+          excludedDomains={config.excludedDomains}
+          onTrack={trackDomain}
           periodLabel={periodLabel}
           surfaceLabel={SURFACE_OPTIONS.find((o) => o.value === surface)?.label ?? "All surfaces"}
         />
       ) : (
-        <ResponsesView histories={ranged} dates={dates} subjects={subjects} hits={hits} surfaces={aiSurfaces} localeLabel={localeLabel} />
+        <ResponsesView
+          histories={ranged}
+          dates={dates}
+          subjects={subjects}
+          hits={hits}
+          surfaces={aiSurfaces}
+          localeLabel={localeLabel}
+          onTrack={trackDomain}
+        />
       )}
     </div>
   );

@@ -3,24 +3,23 @@
 import { useMemo, useState } from "react";
 import {
   computeRankGrid,
-  seriesColor,
   subjectsInResult,
   type HitLookup,
   type RankCell,
   type Subject,
 } from "@/lib/tracking/analytics";
-import { formatPosition, formatShortDate, formatWeekday, urlPath } from "@/lib/tracking/format";
+import { formatShortDate, formatWeekday, urlPath } from "@/lib/tracking/format";
 import type { KeywordHistory } from "@/lib/tracking/types";
 import { AiAnswerBlock, highlightSubjects } from "./AiAnswer";
 import { Favicon } from "./Favicon";
-import { TrendChart } from "./TrendChart";
-import { EmptyState, IconHash, ModeMark, Panel, Segmented, SelectControl, SparkleMark } from "./ui";
+import { EmptyState, IconHash, ModeMark, Panel, Segmented, SelectControl, SparkleMark, TrackButton } from "./ui";
 
 interface RankTrackerViewProps {
   histories: KeywordHistory[];
   subjects: Subject[];
   hits: HitLookup;
   localeLabel: string;
+  onTrack: (domain: string) => void;
 }
 
 type SerpTab = "serp" | "aiOverview" | "aiMode";
@@ -76,7 +75,7 @@ function PositionValue({ cell }: { cell: RankCell | null }) {
   return <span className="font-semibold tabular">{cell.position}</span>;
 }
 
-export function RankTrackerView({ histories, subjects, hits, localeLabel }: RankTrackerViewProps) {
+export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrack }: RankTrackerViewProps) {
   const [subjectId, setSubjectId] = useState("you");
   const [selection, setSelection] = useState<{ keywordId: string; date: string } | null>(null);
   const [tab, setTab] = useState<SerpTab>("serp");
@@ -92,17 +91,6 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel }: Rank
 
   const activeHistory = active ? histories.find((h) => h.keywordId === active.keywordId) ?? null : null;
   const activeDay = activeHistory?.days.find((d) => d.date === active?.date) ?? null;
-
-  const activeDays = activeHistory ? activeHistory.days.filter((d) => !d.error).sort((a, b) => a.date.localeCompare(b.date)) : [];
-  const positionSeries = subjects
-    .map((s, si) => ({
-      id: s.id,
-      label: s.name,
-      color: seriesColor(s.colorSlot),
-      directLabel: si === subjectIndex,
-      values: activeDays.map((d) => hits(d, si).organicPosition),
-    }))
-    .filter((s, si) => si === subjectIndex || s.values.some((v) => v != null));
 
   if (grid.rows.length === 0 || grid.dates.length === 0) {
     return <EmptyState title="No rankings yet" body="Add keywords in Settings and run tracking - positions appear here once a run completes." />;
@@ -253,21 +241,6 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel }: Rank
           className="xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)]"
           bodyClassName="flex min-h-0 flex-col gap-4 overflow-y-auto p-4"
         >
-          <div className="flex flex-col gap-1">
-            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-              Position history
-            </span>
-            <TrendChart
-              dates={activeDays.map((d) => d.date)}
-              series={positionSeries}
-              format={(v) => formatPosition(v)}
-              axisFormat={(v) => `#${v}`}
-              invert
-              height={170}
-              ariaLabel={`Organic position history for ${activeHistory.keyword}`}
-            />
-          </div>
-
           <Segmented
             ariaLabel="Result type"
             value={tab}
@@ -316,6 +289,11 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel }: Rank
                               {owns ? (o.isYourBrand ? "your site" : o.name) : `mentions ${o.isYourBrand ? "you" : o.name}`}
                             </span>
                           ))}
+                          {tags.some((t) => t.owns) ? null : (
+                            <span className="ml-auto">
+                              <TrackButton onClick={() => onTrack(r.domain)} />
+                            </span>
+                          )}
                         </span>
                         <a
                           href={r.link}
@@ -343,6 +321,7 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel }: Rank
               answer={activeDay[tab]}
               subjects={subjects}
               emptyLabel={tab === "aiOverview" ? "Google showed no AI Overview for this search." : "No AI Mode answer was captured."}
+              onTrack={onTrack}
             />
           )}
         </Panel>

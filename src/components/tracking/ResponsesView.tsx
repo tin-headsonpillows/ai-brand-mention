@@ -23,6 +23,7 @@ interface ResponsesViewProps {
   hits: HitLookup;
   surfaces: AiSurface[];
   localeLabel: string;
+  onTrack: (domain: string) => void;
 }
 
 type StatusFilter = "all" | "mentioned" | "missing";
@@ -48,7 +49,7 @@ function StatusChip({ status }: { status: MentionStatus }) {
   return <Chip tone="muted">{STATUS_LABEL[status]}</Chip>;
 }
 
-export function ResponsesView({ histories, dates, subjects, hits, surfaces, localeLabel }: ResponsesViewProps) {
+export function ResponsesView({ histories, dates, subjects, hits, surfaces, localeLabel, onTrack }: ResponsesViewProps) {
   const latestDate = dates[dates.length - 1] ?? null;
   const [pickedDate, setPickedDate] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -129,7 +130,9 @@ export function ResponsesView({ histories, dates, subjects, hits, surfaces, loca
         )}
       </Panel>
 
-      {openItem ? <ResponseDetail item={openItem} subjects={subjects} localeLabel={localeLabel} onClose={() => setOpenKey(null)} /> : null}
+      {openItem ? (
+        <ResponseDetail item={openItem} subjects={subjects} localeLabel={localeLabel} onTrack={onTrack} onClose={() => setOpenKey(null)} />
+      ) : null}
     </>
   );
 }
@@ -187,11 +190,13 @@ function ResponseDetail({
   item,
   subjects,
   localeLabel,
+  onTrack,
   onClose,
 }: {
   item: AiResponseItem;
   subjects: Subject[];
   localeLabel: string;
+  onTrack: (domain: string) => void;
   onClose: () => void;
 }) {
   const [highlight, setHighlight] = useState(true);
@@ -332,7 +337,7 @@ function ResponseDetail({
             <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
               Sources ({item.answer.sources.length})
             </span>
-            <SourceList sources={item.answer.sources} subjects={subjects} />
+            <SourceList sources={item.answer.sources} subjects={subjects} onTrack={onTrack} />
           </section>
         </aside>
       </div>

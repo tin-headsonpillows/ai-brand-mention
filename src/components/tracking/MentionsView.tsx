@@ -5,16 +5,18 @@ import { periodMetrics, seriesColor, type DomainRow, type SubjectSeries } from "
 import { formatCount, formatPosition, trendTitle } from "@/lib/tracking/format";
 import { Favicon } from "./Favicon";
 import { TrendChart } from "./TrendChart";
-import { ChartTableToggle, Delta, Headline, IconGlobe, IconLink, IconMessage, Panel, Switch, type ChartView } from "./ui";
+import { ChartTableToggle, Delta, Headline, IconGlobe, IconLink, IconMessage, Panel, Switch, TrackButton, type ChartView } from "./ui";
 
 interface MentionsViewProps {
   dates: string[];
   series: SubjectSeries[];
   domainRows: DomainRow[];
-  hiddenCount: number;
+  excludedDomains: string[];
   compare: boolean;
   onCompareChange: (v: boolean) => void;
   onExclude: (domain: string) => void;
+  onUnexclude: (domain: string) => void;
+  onTrack: (domain: string) => void;
   periodLabel: string;
   surfaceLabel: string;
 }
@@ -25,16 +27,19 @@ export function MentionsView({
   dates,
   series,
   domainRows,
-  hiddenCount,
+  excludedDomains,
   compare,
   onCompareChange,
   onExclude,
+  onUnexclude,
+  onTrack,
   periodLabel,
   surfaceLabel,
 }: MentionsViewProps) {
   const [mentionsView, setMentionsView] = useState<ChartView>("chart");
   const [citationsView, setCitationsView] = useState<ChartView>("chart");
   const [showAll, setShowAll] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
 
   const shown = compare ? series : series.filter((s) => s.subject.isYourBrand);
   const metrics = periodMetrics(series, Math.max(0, series.findIndex((s) => s.subject.isYourBrand)));
@@ -119,9 +124,13 @@ export function MentionsView({
         bodyClassName="overflow-x-auto"
         footer={
           <>
-            <span>
+            <span className="flex items-center gap-2">
               {domainRows.length} domains · {periodLabel}
-              {hiddenCount > 0 ? ` · ${hiddenCount} hidden (manage in Settings)` : ""}
+              {excludedDomains.length > 0 ? (
+                <button type="button" onClick={() => setShowHidden((v) => !v)} className="font-medium" style={{ color: "var(--series-1)" }}>
+                  {showHidden ? "Hide list" : `${excludedDomains.length} hidden`}
+                </button>
+              ) : null}
             </span>
             {domainRows.length > VISIBLE_ROWS ? (
               <button type="button" onClick={() => setShowAll((v) => !v)} className="font-medium" style={{ color: "var(--series-1)" }}>
@@ -131,6 +140,33 @@ export function MentionsView({
           </>
         }
       >
+        {showHidden && excludedDomains.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3" style={{ borderColor: "var(--gridline)" }}>
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              Hidden:
+            </span>
+            {excludedDomains.map((d) => (
+              <span
+                key={d}
+                className="flex items-center gap-1.5 rounded-full border py-0.5 pl-2 pr-1 text-xs"
+                style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)" }}
+              >
+                <Favicon domain={d} size={14} />
+                {d}
+                <button
+                  type="button"
+                  onClick={() => onUnexclude(d)}
+                  aria-label={`Show ${d} again`}
+                  title="Show again"
+                  className="flex h-4 w-4 items-center justify-center rounded-full"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
         {domainRows.length === 0 ? (
           <p className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>
             No cited websites in this period yet.
@@ -205,17 +241,20 @@ export function MentionsView({
                   <td className="px-3 py-2 text-right tabular" style={{ color: "var(--text-primary)" }}>
                     {row.keywords}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {row.owner?.isYourBrand ? null : (
-                      <button
-                        type="button"
-                        onClick={() => onExclude(row.domain)}
-                        className="rounded border px-2 py-0.5 text-xs opacity-60 group-hover:opacity-100 focus:opacity-100"
-                        style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)" }}
-                        title="Exclude this blog / OTA from the leaderboard"
-                      >
-                        Hide
-                      </button>
+                  <td className="px-3 py-2">
+                    {row.owner ? null : (
+                      <span className="flex items-center justify-end gap-1.5">
+                        <TrackButton onClick={() => onTrack(row.domain)} />
+                        <button
+                          type="button"
+                          onClick={() => onExclude(row.domain)}
+                          className="rounded-md border px-2 py-0.5 text-[11px] font-semibold"
+                          style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)" }}
+                          title="Hide this blog / OTA from the leaderboard"
+                        >
+                          Hide
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>

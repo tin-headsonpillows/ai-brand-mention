@@ -459,6 +459,50 @@ export interface DomainRow {
   keywords: number;
   total: number;
   sampleLink: string | null;
+  /** Best guess at the brand behind the domain, from its page titles - used when tracking it as a competitor. */
+  siteName: string;
+}
+
+const compact = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Titles usually carry the site's brand as their first or last segment ("Indochina Junk | Bai Tu Long
+ * Bay Cruises", "Halong Bay Cruises - Heritage Cruises"). Prefer a segment that spells the domain's own
+ * label, then one repeated across the site's titles, then fall back to the domain label itself.
+ */
+export function guessSiteName(domain: string, titles: string[]): string {
+  const labels = domain.split(".");
+  const label = (labels.length > 2 && labels[labels.length - 2].length <= 3 ? labels[labels.length - 3] : labels[labels.length - 2]) ?? domain;
+  const counts = new Map<string, number>();
+  let domainMatch: string | null = null;
+
+  for (const title of titles) {
+    // "Ambassador Cruise Ha Long" -> leading words that spell the domain label ("ambassadorcruise").
+    const words = title.split(/\s+/);
+    let acc = "";
+    for (let i = 0; i < Math.min(words.length, 6) && !domainMatch; i++) {
+      acc += compact(words[i]);
+      if (acc.length >= 4 && acc === compact(label)) domainMatch = words.slice(0, i + 1).join(" ").replace(/[^\p{L}\p{N}]+$/u, "");
+      if (!compact(label).startsWith(acc)) break;
+    }
+    const parts = title.split(/\s+[|\-–—:·]\s+/).map((p) => p.trim()).filter((p) => p.length >= 2 && p.length <= 40);
+    const ends = parts.length > 1 ? Array.from(new Set([parts[0], parts[parts.length - 1]])) : parts;
+    for (const part of ends) {
+      const c = compact(part);
+      if (!domainMatch && c.length >= 4 && (c === compact(label) || compact(label).startsWith(c))) domainMatch = part;
+      if (parts.length > 1) counts.set(part, (counts.get(part) ?? 0) + 1);
+    }
+  }
+  if (domainMatch) return domainMatch;
+
+  const repeated = Array.from(counts.entries()).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1])[0];
+  if (repeated) return repeated[0];
+
+  return label
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 /** Every domain seen in organic results or cited as an AI source, minus user-excluded ones. */
@@ -467,28 +511,23 @@ export function computeDomainRows(
   subjects: Subject[],
   excludedDomains: string[],
   filter: SurfaceFilter
-): { rows: DomainRow[]; hiddenCount: number } {
+): DomainRow[] {
   const surfaces = surfacesIn(filter);
-  const excluded = excludedDomains.map((d) => d.toLowerCase().trim().replace(/^www\./, "")).filter(Boolean);
-  const isExcluded = (domain: string) => excluded.some((ex) => domain === ex || domain.endsWith(`.${ex}`));
+  const isExcluded = (domain: string) => excludedDomains.some((ex) => domainMatchesWebsite(domain, ex));
   const byDomain = new Map<
     string,
-    { organic: number; positionSum: number; aio: number; aiMode: number; keywords: Set<string>; link: string | null }
+    { organic: number; positionSum: number; aio: number; aiMode: number; keywords: Set<string>; link: string | null; titles: Set<string> }
   >();
-  const hidden = new Set<string>();
-
-  const entry = (domain: string, keyword: string, link: string) => {
+  const entry = (domain: string, keyword: string, link: string, title: string) => {
     if (!domain) return null;
-    if (isExcluded(domain)) {
-      hidden.add(domain);
-      return null;
-    }
+    if (isExcluded(domain)) return null;
     let e = byDomain.get(domain);
     if (!e) {
-      e = { organic: 0, positionSum: 0, aio: 0, aiMode: 0, keywords: new Set(), link };
+      e = { organic: 0, positionSum: 0, aio: 0, aiMode: 0, keywords: new Set(), link, titles: new Set() };
       byDomain.set(domain, e);
     }
     e.keywords.add(keyword);
+    if (title) e.titles.add(title);
     return e;
   };
 
@@ -497,7 +536,7 @@ export function computeDomainRows(
       if (day.error) continue;
       if (surfaces.includes("organic")) {
         for (const r of day.organicResults) {
-          const e = entry(r.domain, h.keyword, r.link);
+          const e = entry(r.domain, h.keyword, r.link, r.title);
           if (e) {
             e.organic++;
             e.positionSum += r.position;
@@ -506,13 +545,13 @@ export function computeDomainRows(
       }
       if (surfaces.includes("aiOverview")) {
         for (const s of day.aiOverview.sources) {
-          const e = entry(s.domain, h.keyword, s.link);
+          const e = entry(s.domain, h.keyword, s.link, s.title);
           if (e) e.aio++;
         }
       }
       if (surfaces.includes("aiMode")) {
         for (const s of day.aiMode.sources) {
-          const e = entry(s.domain, h.keyword, s.link);
+          const e = entry(s.domain, h.keyword, s.link, s.title);
           if (e) e.aiMode++;
         }
       }
@@ -529,9 +568,10 @@ export function computeDomainRows(
     keywords: e.keywords.size,
     total: e.organic + e.aio + e.aiMode,
     sampleLink: e.link,
+    siteName: guessSiteName(domain, Array.from(e.titles)),
   }));
   rows.sort((a, b) => b.total - a.total || a.domain.localeCompare(b.domain));
-  return { rows, hiddenCount: hidden.size };
+  return rows;
 }
 
 export type MentionStatus = "cited" | "mentioned" | "none" | "notShown";

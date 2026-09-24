@@ -411,3 +411,25 @@ export function ModeMark({ filled, title }: { filled: boolean; title: string }) 
     </svg>
   );
 }
+
+/** Adds a domain seen in the SERP as a tracked competitor. */
+export function TrackButton({ onClick, label = "Track" }: { onClick: () => void; label?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-semibold"
+      style={{
+        borderColor: "color-mix(in srgb, var(--series-1) 45%, transparent)",
+        color: "var(--series-1)",
+        background: "var(--surface-1)",
+      }}
+      title="Track this site as a competitor"
+    >
+      + {label}
+    </button>
+  );
+}

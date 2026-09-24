@@ -1,14 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import type { DomainRow } from "@/lib/tracking/analytics";
+import { formatPosition } from "@/lib/tracking/format";
 import type { TrackedCompetitor, TrackingConfig } from "@/lib/tracking/types";
 import { Favicon } from "./Favicon";
-import { Panel, inputStyle } from "./ui";
+import { Panel, TrackButton, inputStyle } from "./ui";
 
 interface SettingsViewProps {
   config: TrackingConfig;
   onDraftChange: (next: TrackingConfig) => void;
   onSave: (next: TrackingConfig) => void;
+  /** Domains seen in your SERPs that aren't your site or an already-tracked competitor. */
+  suggestions: DomainRow[];
+  onTrack: (domain: string) => void;
+  onExclude: (domain: string) => void;
 }
 
 const LANGUAGES = [
@@ -41,9 +47,9 @@ const COUNTRIES = [
 
 const fieldLabel = "flex flex-col gap-1 text-xs";
 
-export function SettingsView({ config, onDraftChange, onSave }: SettingsViewProps) {
+export function SettingsView({ config, onDraftChange, onSave, suggestions, onTrack, onExclude }: SettingsViewProps) {
   const [newKeywords, setNewKeywords] = useState("");
-  const [newExcluded, setNewExcluded] = useState("");
+  const [filter, setFilter] = useState("");
 
   const addKeywords = () => {
     const existing = new Set(config.keywords.map((k) => k.keyword.toLowerCase()));
@@ -57,15 +63,10 @@ export function SettingsView({ config, onDraftChange, onSave }: SettingsViewProp
     setNewKeywords("");
   };
 
-  const addExcluded = () => {
-    const domains = newExcluded
-      .split(/[\s,]+/)
-      .map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
-      .filter((d) => d && !config.excludedDomains.includes(d));
-    if (domains.length === 0) return;
-    onSave({ ...config, excludedDomains: [...config.excludedDomains, ...domains] });
-    setNewExcluded("");
-  };
+  const query = filter.trim().toLowerCase();
+  const visibleSuggestions = query
+    ? suggestions.filter((r) => r.domain.includes(query) || r.siteName.toLowerCase().includes(query))
+    : suggestions;
 
   const updateCompetitor = (id: string, patch: Partial<TrackedCompetitor>) =>
     onDraftChange({ ...config, competitors: config.competitors.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
@@ -175,9 +176,110 @@ export function SettingsView({ config, onDraftChange, onSave }: SettingsViewProp
 
       <Panel
         title="Competitors"
-        subtitle="Applied retroactively to history you've already collected"
+        subtitle="Pick them from the sites that actually rank for your keywords"
         className="xl:col-span-2"
-        actions={
+        bodyClassName="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]"
+      >
+        <div className="flex flex-col gap-3 border-b p-4 lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border-hairline)" }}>
+          <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
+            Tracking ({config.competitors.length})
+          </span>
+          {config.competitors.length === 0 ? (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              None yet. Click <strong>+ Track</strong> on a site from your SERPs - rankings, share of voice and the rank
+              tracker then compare you against it, including on days already tracked.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {config.competitors.map((c) => (
+                <li key={c.id} className="flex flex-col gap-2 rounded-lg border p-2.5" style={{ borderColor: "var(--border-hairline)" }}>
+                  <div className="flex items-center gap-2">
+                    <Favicon domain={c.website} label={c.name} size={18} />
+                    <input
+                      value={c.name}
+                      onChange={(e) => updateCompetitor(c.id, { name: e.target.value })}
+                      onBlur={() => onSave(config)}
+                      aria-label="Competitor name"
+                      className="min-w-0 flex-1 rounded-md border px-2 py-1 text-sm font-medium"
+                      style={inputStyle}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onSave({ ...config, competitors: config.competitors.filter((x) => x.id !== c.id) })}
+                      className="shrink-0 text-xs"
+                      style={{ color: "var(--status-critical)" }}
+                    >
+                      Stop tracking
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 pl-[26px] text-xs" style={{ color: "var(--text-muted)" }}>
+                    <span className="shrink-0">{c.website || "no website"}</span>
+                    <input
+                      value={c.aliases.join(", ")}
+                      onChange={(e) => updateCompetitor(c.id, { aliases: splitAliases(e.target.value) })}
+                      onBlur={() => onSave(config)}
+                      placeholder="Other names it goes by (comma-separated)"
+                      aria-label="Competitor aliases"
+                      className="min-w-0 flex-1 rounded-md border px-2 py-1 text-xs"
+                      style={inputStyle}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-3 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
+              Suggested from your SERPs ({suggestions.length})
+            </span>
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter sites"
+              aria-label="Filter suggested sites"
+              className="w-40 rounded-md border px-2 py-1 text-xs"
+              style={inputStyle}
+            />
+          </div>
+          {suggestions.length === 0 ? (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Run tracking once and every site that ranks or gets cited for your keywords will show up here.
+            </p>
+          ) : (
+            <ul className="flex max-h-[420px] flex-col overflow-y-auto">
+              {visibleSuggestions.map((r) => {
+                const aiCitations = r.aiOverviewCitations + r.aiModeCitations;
+                return (
+                  <li key={r.domain} className="flex items-center gap-2.5 border-b py-2 last:border-b-0" style={{ borderColor: "var(--gridline)" }}>
+                    <Favicon domain={r.domain} label={r.siteName} size={20} />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                        {r.siteName}
+                      </span>
+                      <span className="truncate text-[11px]" style={{ color: "var(--text-muted)" }}>
+                        {r.domain} · {r.keywords} keyword{r.keywords === 1 ? "" : "s"}
+                        {r.avgPosition != null ? ` · avg ${formatPosition(Math.round(r.avgPosition * 10) / 10)}` : ""}
+                        {aiCitations > 0 ? ` · ${aiCitations} AI citation${aiCitations === 1 ? "" : "s"}` : ""}
+                      </span>
+                    </div>
+                    <TrackButton onClick={() => onTrack(r.domain)} />
+                    <button
+                      type="button"
+                      onClick={() => onExclude(r.domain)}
+                      className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px]"
+                      style={{ color: "var(--text-muted)" }}
+                      title="Not a competitor (blog, OTA, forum) - hide it"
+                    >
+                      Hide
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           <button
             type="button"
             onClick={() =>
@@ -186,77 +288,15 @@ export function SettingsView({ config, onDraftChange, onSave }: SettingsViewProp
                 competitors: [...config.competitors, { id: crypto.randomUUID(), name: "", aliases: [], website: "" }],
               })
             }
-            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
-            style={{ background: "var(--series-1)" }}
+            className="self-start text-xs"
+            style={{ color: "var(--text-muted)" }}
           >
-            + Add competitor
+            Not in your SERPs yet? Add one by name
           </button>
-        }
-      >
-        {config.competitors.length === 0 ? (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            No competitors yet. Add the brands you actually compete with - rankings, share of voice and the rank tracker
-            will compare you against exactly these.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div
-              className="hidden grid-cols-[28px_1fr_1fr_1fr_auto] gap-2 px-1 text-xs sm:grid"
-              style={{ color: "var(--text-muted)" }}
-            >
-              <span />
-              <span>Name</span>
-              <span>Aliases (comma-separated)</span>
-              <span>Website</span>
-              <span className="w-14" />
-            </div>
-            {config.competitors.map((c) => (
-              <div key={c.id} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[28px_1fr_1fr_1fr_auto]">
-                <span className="hidden sm:block">
-                  <Favicon domain={c.website} label={c.name} size={20} />
-                </span>
-                <input
-                  value={c.name}
-                  onChange={(e) => updateCompetitor(c.id, { name: e.target.value })}
-                  onBlur={() => onSave(config)}
-                  placeholder="Competitor name"
-                  aria-label="Competitor name"
-                  className="rounded-lg border px-2.5 py-2 text-sm"
-                  style={inputStyle}
-                />
-                <input
-                  value={c.aliases.join(", ")}
-                  onChange={(e) => updateCompetitor(c.id, { aliases: splitAliases(e.target.value) })}
-                  onBlur={() => onSave(config)}
-                  placeholder="Other names"
-                  aria-label="Competitor aliases"
-                  className="rounded-lg border px-2.5 py-2 text-sm"
-                  style={inputStyle}
-                />
-                <input
-                  value={c.website}
-                  onChange={(e) => updateCompetitor(c.id, { website: e.target.value })}
-                  onBlur={() => onSave(config)}
-                  placeholder="competitor.com"
-                  aria-label="Competitor website"
-                  className="rounded-lg border px-2.5 py-2 text-sm"
-                  style={inputStyle}
-                />
-                <button
-                  type="button"
-                  onClick={() => onSave({ ...config, competitors: config.competitors.filter((x) => x.id !== c.id) })}
-                  className="w-14 text-xs"
-                  style={{ color: "var(--status-critical)" }}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        </div>
       </Panel>
 
-      <Panel title="Keywords" subtitle={`${config.keywords.filter((k) => k.active).length} active of ${config.keywords.length}`}>
+      <Panel className="xl:col-span-2" title="Keywords" subtitle={`${config.keywords.filter((k) => k.active).length} active of ${config.keywords.length}`}>
         <div className="flex flex-col gap-2">
           <textarea
             value={newKeywords}
@@ -305,59 +345,6 @@ export function SettingsView({ config, onDraftChange, onSave }: SettingsViewProp
               </li>
             ))}
           </ul>
-        )}
-      </Panel>
-
-      <Panel title="Excluded domains" subtitle="Blogs, OTAs and forums hidden from Cited websites">
-        <div className="flex gap-2">
-          <input
-            value={newExcluded}
-            onChange={(e) => setNewExcluded(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addExcluded();
-              }
-            }}
-            placeholder="tripadvisor.com, reddit.com"
-            className="flex-1 rounded-lg border px-3 py-2 text-sm"
-            style={inputStyle}
-          />
-          <button
-            type="button"
-            onClick={addExcluded}
-            className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
-            style={{ borderColor: "var(--border-hairline)", color: "var(--text-primary)" }}
-          >
-            Exclude
-          </button>
-        </div>
-        {config.excludedDomains.length === 0 ? (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Nothing excluded. You can also click &quot;Hide&quot; on any row in Mentions &amp; Citations.
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {config.excludedDomains.map((d) => (
-              <span
-                key={d}
-                className="flex items-center gap-1.5 rounded-full border py-1 pl-2 pr-1 text-xs"
-                style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)" }}
-              >
-                <Favicon domain={d} size={14} />
-                {d}
-                <button
-                  type="button"
-                  onClick={() => onSave({ ...config, excludedDomains: config.excludedDomains.filter((x) => x !== d) })}
-                  aria-label={`Stop excluding ${d}`}
-                  className="flex h-4 w-4 items-center justify-center rounded-full"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
         )}
       </Panel>
     </div>

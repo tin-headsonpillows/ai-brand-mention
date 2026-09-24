@@ -4,6 +4,7 @@ import { Fragment, type ReactNode } from "react";
 import { domainMatchesWebsite, type Subject } from "@/lib/tracking/analytics";
 import type { AiTextSnapshot, SourceRef } from "@/lib/tracking/types";
 import { Favicon } from "./Favicon";
+import { TrackButton } from "./ui";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -58,7 +59,15 @@ export function AnswerText({ text, subjects, highlight = true }: { text: string;
   );
 }
 
-export function SourceList({ sources, subjects }: { sources: SourceRef[]; subjects: Subject[] }) {
+export function SourceList({
+  sources,
+  subjects,
+  onTrack,
+}: {
+  sources: SourceRef[];
+  subjects: Subject[];
+  onTrack?: (domain: string) => void;
+}) {
   if (sources.length === 0) {
     return (
       <p className="text-xs" style={{ color: "var(--text-muted)" }}>
@@ -71,17 +80,15 @@ export function SourceList({ sources, subjects }: { sources: SourceRef[]; subjec
       {sources.map((s, i) => {
         const owner = subjects.find((sub) => domainMatchesWebsite(s.domain, sub.website));
         return (
-          <li key={`${s.link}-${i}`}>
-            <a
-              href={s.link}
-              target="_blank"
-              rel="noreferrer"
-              className="flex flex-col gap-0.5 rounded-lg border p-2.5 hover:opacity-90"
-              style={{
-                borderColor: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 45%, transparent)" : "var(--border-hairline)",
-                background: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 7%, transparent)" : "var(--surface-1)",
-              }}
-            >
+          <li
+            key={`${s.link}-${i}`}
+            className="flex items-start gap-2 rounded-lg border p-2.5"
+            style={{
+              borderColor: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 45%, transparent)" : "var(--border-hairline)",
+              background: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 7%, transparent)" : "var(--surface-1)",
+            }}
+          >
+            <a href={s.link} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col gap-0.5 hover:opacity-90">
               <span className="flex items-center gap-2">
                 <Favicon domain={s.domain} />
                 <span className="line-clamp-1 text-xs font-medium" style={{ color: "var(--text-primary)" }}>
@@ -93,6 +100,7 @@ export function SourceList({ sources, subjects }: { sources: SourceRef[]; subjec
                 {owner ? ` · ${owner.isYourBrand ? "your site" : owner.name}` : ""}
               </span>
             </a>
+            {onTrack && !owner && s.domain ? <TrackButton onClick={() => onTrack(s.domain)} /> : null}
           </li>
         );
       })}
@@ -100,7 +108,17 @@ export function SourceList({ sources, subjects }: { sources: SourceRef[]; subjec
   );
 }
 
-export function AiAnswerBlock({ answer, subjects, emptyLabel }: { answer: AiTextSnapshot; subjects: Subject[]; emptyLabel: string }) {
+export function AiAnswerBlock({
+  answer,
+  subjects,
+  emptyLabel,
+  onTrack,
+}: {
+  answer: AiTextSnapshot;
+  subjects: Subject[];
+  emptyLabel: string;
+  onTrack?: (domain: string) => void;
+}) {
   if (!answer.present || !answer.text) {
     return (
       <p className="text-sm" style={{ color: "var(--text-muted)" }}>
@@ -115,7 +133,7 @@ export function AiAnswerBlock({ answer, subjects, emptyLabel }: { answer: AiText
         <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
           Sources ({answer.sources.length})
         </span>
-        <SourceList sources={answer.sources} subjects={subjects} />
+        <SourceList sources={answer.sources} subjects={subjects} onTrack={onTrack} />
       </div>
     </div>
   );
