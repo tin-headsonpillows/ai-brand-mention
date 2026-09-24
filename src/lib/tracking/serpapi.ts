@@ -25,6 +25,7 @@ interface RawTextBlock {
 interface RawReference {
   title?: unknown;
   link?: unknown;
+  source?: unknown;
 }
 
 function flattenTextBlocks(blocks: RawTextBlock[] | undefined): string {
@@ -49,6 +50,7 @@ function mapReferences(refs: RawReference[] | undefined): SourceRef[] {
       title: typeof r.title === "string" ? r.title : "",
       link: typeof r.link === "string" ? r.link : "",
       domain: typeof r.link === "string" ? extractDomain(r.link) : "",
+      ...(typeof r.source === "string" && r.source.trim() ? { source: r.source.trim() } : {}),
     }))
     .filter((r) => r.link);
 }
@@ -57,9 +59,12 @@ function localeParams(settings: TrackingSettings): Record<string, string> {
   return { gl: settings.country, hl: settings.language, device: settings.device };
 }
 
-interface OrganicFetchResult {
-  organicResults: OrganicResultSnapshot[];
+export interface OrganicPage {
+  /** Positions as SerpApi reports them - they restart at 1 on every page, so callers renumber. */
+  results: OrganicResultSnapshot[];
   aiOverviewPageToken: string | null;
+  hasNextPage: boolean;
+  showingResultsFor: string | null;
 }
 
 interface RawOrganicResult {
@@ -67,27 +72,44 @@ interface RawOrganicResult {
   title?: unknown;
   link?: unknown;
   snippet?: unknown;
+  source?: unknown;
 }
 
 interface RawOrganicResponse {
   organic_results?: RawOrganicResult[];
   ai_overview?: { page_token?: unknown };
+  search_information?: { showing_results_for?: unknown; spelling_fix?: unknown };
+  serpapi_pagination?: { next?: unknown };
   error?: string;
 }
 
-/** Fetches the regular Google organic results, plus the AI Overview stub token if Google shows one for this query. */
-export async function fetchOrganic(
+/**
+ * Fetches one 10-result page of Google organic results (`start` = 0, 10, 20 ...) plus, on page 1, the
+ * AI Overview stub token. Google no longer honours `num=100`, so deeper tracking means paging.
+ */
+export async function fetchOrganicPage(
   query: string,
   settings: TrackingSettings,
-  apiKey: string
-): Promise<OrganicFetchResult> {
+  apiKey: string,
+  start: number,
+  noCache = false
+): Promise<OrganicPage> {
   const params = new URLSearchParams({ engine: "google", q: query, api_key: apiKey, ...localeParams(settings) });
+  if (start > 0) params.set("start", String(start));
+  if (noCache) params.set("no_cache", "true");
   const res = await fetch(`${BASE_URL}?${params.toString()}`);
   if (!res.ok) throw new Error(`SerpApi google request failed with status ${res.status}`);
   const data = (await res.json()) as RawOrganicResponse;
-  if (data.error) throw new Error(`SerpApi google error: ${data.error}`);
+  if (data.error) {
+    // Paging past the last result is a normal empty page, not a failure - throwing here would make the
+    // key rotator treat it as a dead key and burn through every configured key.
+    if (/hasn't returned any results/i.test(data.error)) {
+      return { results: [], aiOverviewPageToken: null, hasNextPage: false, showingResultsFor: null };
+    }
+    throw new Error(`SerpApi google error: ${data.error}`);
+  }
 
-  const organicResults: OrganicResultSnapshot[] = (data.organic_results ?? [])
+  const results: OrganicResultSnapshot[] = (data.organic_results ?? [])
     .map((r): OrganicResultSnapshot | null => {
       const link = typeof r.link === "string" ? r.link : "";
       if (!link) return null;
@@ -97,12 +119,20 @@ export async function fetchOrganic(
         link,
         domain: extractDomain(link),
         snippet: typeof r.snippet === "string" ? r.snippet : "",
+        ...(typeof r.source === "string" && r.source.trim() ? { source: r.source.trim() } : {}),
       };
     })
     .filter((r): r is OrganicResultSnapshot => r !== null);
 
-  const pageToken = typeof data.ai_overview?.page_token === "string" ? data.ai_overview.page_token : null;
-  return { organicResults, aiOverviewPageToken: pageToken };
+  const info = data.search_information;
+  const rewritten = typeof info?.showing_results_for === "string" ? info.showing_results_for : typeof info?.spelling_fix === "string" ? info.spelling_fix : null;
+
+  return {
+    results,
+    aiOverviewPageToken: typeof data.ai_overview?.page_token === "string" ? data.ai_overview.page_token : null,
+    hasNextPage: typeof data.serpapi_pagination?.next === "string" && results.length > 0,
+    showingResultsFor: rewritten,
+  };
 }
 
 interface RawAiOverviewResponse {

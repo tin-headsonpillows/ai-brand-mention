@@ -433,3 +433,38 @@ export function TrackButton({ onClick, label = "Track" }: { onClick: () => void;
     </button>
   );
 }
+
+const GOOGLE_VIA_HELP: Record<string, string> = {
+  "Google Things to Do": "Reached Google's answer through its Things to Do booking feed, not the operator's own page",
+  "Google Business Profile": "Comes from a Google Business Profile (or its website button), not an independent page",
+  "Google Maps": "A Google Maps listing",
+  "Google Search": "A Google Search results view (search viewer), not an external page",
+  "Google Travel": "A Google Travel page",
+  "Google Hotels": "A Google Hotels listing",
+  "Google Shopping": "A Google Shopping listing",
+  Google: "A Google-hosted page",
+};
+
+/** Marks a citation that Google sourced from its own products/feeds rather than an independent website. */
+export function GoogleViaBadge({ via, count }: { via: string; count?: number }) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold"
+      style={{
+        borderColor: "color-mix(in srgb, var(--series-4) 55%, transparent)",
+        background: "color-mix(in srgb, var(--series-4) 14%, transparent)",
+        color: "var(--text-primary)",
+      }}
+      title={GOOGLE_VIA_HELP[via] ?? "Sourced from a Google surface"}
+    >
+      <svg width="10" height="10" viewBox="0 0 16 16" aria-hidden>
+        <path d="M15.5 8.2c0-.6-.1-1.1-.2-1.6H8v3h4.2a3.6 3.6 0 0 1-1.6 2.4v2h2.6c1.5-1.4 2.3-3.4 2.3-5.8Z" fill="#4285F4" />
+        <path d="M8 16c2.2 0 4-.7 5.3-1.9l-2.6-2a4.8 4.8 0 0 1-7.2-2.5H.9v2A8 8 0 0 0 8 16Z" fill="#34A853" />
+        <path d="M3.5 9.6a4.8 4.8 0 0 1 0-3.1v-2H.9a8 8 0 0 0 0 7.2l2.6-2.1Z" fill="#FBBC05" />
+        <path d="M8 3.2c1.2 0 2.3.4 3.2 1.2l2.3-2.3A8 8 0 0 0 .9 4.4l2.6 2A4.8 4.8 0 0 1 8 3.2Z" fill="#EA4335" />
+      </svg>
+      via {via}
+      {count && count > 1 ? <span style={{ color: "var(--text-secondary)" }}>×{count}</span> : null}
+    </span>
+  );
+}

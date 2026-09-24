@@ -1,10 +1,11 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
-import { domainMatchesWebsite, type Subject } from "@/lib/tracking/analytics";
+import { domainMatchesWebsite, googleVia, type Subject } from "@/lib/tracking/analytics";
+import { isGoogleHost } from "@/lib/tracking/visibility";
 import type { AiTextSnapshot, SourceRef } from "@/lib/tracking/types";
 import { Favicon } from "./Favicon";
-import { TrackButton } from "./ui";
+import { GoogleViaBadge, TrackButton } from "./ui";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -78,14 +79,28 @@ export function SourceList({
   return (
     <ul className="flex flex-col gap-2">
       {sources.map((s, i) => {
-        const owner = subjects.find((sub) => domainMatchesWebsite(s.domain, sub.website));
+        const onGoogle = isGoogleHost(s.domain);
+        const owner = subjects.find(
+          (sub) =>
+            domainMatchesWebsite(s.domain, sub.website) ||
+            (onGoogle && [sub.def.name, ...sub.def.aliases].some((n) => n.trim().length > 2 && s.title.toLowerCase().includes(n.trim().toLowerCase())))
+        );
+        const via = googleVia(s.link);
         return (
           <li
             key={`${s.link}-${i}`}
             className="flex items-start gap-2 rounded-lg border p-2.5"
             style={{
-              borderColor: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 45%, transparent)" : "var(--border-hairline)",
-              background: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 7%, transparent)" : "var(--surface-1)",
+              borderColor: owner?.isYourBrand
+                ? "color-mix(in srgb, var(--series-1) 45%, transparent)"
+                : via
+                  ? "color-mix(in srgb, var(--series-4) 45%, transparent)"
+                  : "var(--border-hairline)",
+              background: owner?.isYourBrand
+                ? "color-mix(in srgb, var(--series-1) 7%, transparent)"
+                : via
+                  ? "color-mix(in srgb, var(--series-4) 7%, transparent)"
+                  : "var(--surface-1)",
             }}
           >
             <a href={s.link} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col gap-0.5 hover:opacity-90">
@@ -95,12 +110,16 @@ export function SourceList({
                   {s.title || s.domain}
                 </span>
               </span>
-              <span className="line-clamp-1 pl-6 text-[11px]" style={{ color: "var(--text-muted)" }}>
-                {s.domain}
-                {owner ? ` · ${owner.isYourBrand ? "your site" : owner.name}` : ""}
+              <span className="flex flex-wrap items-center gap-1.5 pl-6 text-[11px]" style={{ color: "var(--text-muted)" }}>
+                <span className="truncate">
+                  {s.source && !onGoogle && !/\.[a-z]{2,}$/i.test(s.source) ? `${s.source} · ` : ""}
+                  {s.domain}
+                  {owner ? ` · ${owner.isYourBrand ? "you" : owner.name}` : ""}
+                </span>
+                {via ? <GoogleViaBadge via={via} /> : null}
               </span>
             </a>
-            {onTrack && !owner && s.domain ? <TrackButton onClick={() => onTrack(s.domain)} /> : null}
+            {onTrack && !owner && s.domain && !onGoogle ? <TrackButton onClick={() => onTrack(s.domain)} /> : null}
           </li>
         );
       })}

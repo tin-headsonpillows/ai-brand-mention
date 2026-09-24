@@ -30,7 +30,7 @@ async function writeJson(pathname: string, data: unknown): Promise<void> {
 
 function defaultConfig(): TrackingConfig {
   return {
-    settings: { language: "en", country: "us", device: "mobile" },
+    settings: { language: "en", country: "us", device: "mobile", resultDepth: 100 },
     keywords: [],
     brand: { name: "", aliases: [], website: "" },
     competitors: [],
@@ -42,7 +42,8 @@ export async function readConfig(): Promise<TrackingConfig> {
   const config = await readJson<TrackingConfig>(CONFIG_PATH);
   if (!config) return defaultConfig();
   // Backfill fields added after some configs were already saved to the blob store.
-  return { ...defaultConfig(), ...config };
+  const defaults = defaultConfig();
+  return { ...defaults, ...config, settings: { ...defaults.settings, ...config.settings } };
 }
 
 export async function writeConfig(config: TrackingConfig): Promise<void> {

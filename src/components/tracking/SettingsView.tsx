@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { DomainRow } from "@/lib/tracking/analytics";
 import { formatPosition } from "@/lib/tracking/format";
-import type { TrackedCompetitor, TrackingConfig } from "@/lib/tracking/types";
+import { RESULT_DEPTHS, type ResultDepth, type TrackedCompetitor, type TrackingConfig } from "@/lib/tracking/types";
 import { Favicon } from "./Favicon";
 import { Panel, TrackButton, inputStyle } from "./ui";
 
@@ -15,6 +15,8 @@ interface SettingsViewProps {
   suggestions: DomainRow[];
   onTrack: (domain: string) => void;
   onExclude: (domain: string) => void;
+  /** Searches left on the SerpApi key currently in use, if known. */
+  searchesLeft: number | null;
 }
 
 const LANGUAGES = [
@@ -47,7 +49,7 @@ const COUNTRIES = [
 
 const fieldLabel = "flex flex-col gap-1 text-xs";
 
-export function SettingsView({ config, onDraftChange, onSave, suggestions, onTrack, onExclude }: SettingsViewProps) {
+export function SettingsView({ config, onDraftChange, onSave, suggestions, onTrack, onExclude, searchesLeft }: SettingsViewProps) {
   const [newKeywords, setNewKeywords] = useState("");
   const [filter, setFilter] = useState("");
 
@@ -127,10 +129,24 @@ export function SettingsView({ config, onDraftChange, onSave, suggestions, onTra
             </select>
           </label>
         </div>
-        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-          Tracking runs automatically every day at 03:00 UTC. Each keyword costs 2-3 SerpApi searches per run (organic
-          results, AI Overview when Google shows one, and AI Mode).
-        </p>
+        <label className={fieldLabel} style={{ color: "var(--text-secondary)" }}>
+          Results tracked per keyword
+          <select
+            value={config.settings.resultDepth}
+            onChange={(e) =>
+              onSave({ ...config, settings: { ...config.settings, resultDepth: Number(e.target.value) as ResultDepth } })
+            }
+            className="rounded-lg border px-2.5 py-2 text-sm"
+            style={inputStyle}
+          >
+            {RESULT_DEPTHS.map((d) => (
+              <option key={d} value={d}>
+                Top {d} ({d / 10} search{d === 10 ? "" : "es"} per keyword)
+              </option>
+            ))}
+          </select>
+        </label>
+        <CostEstimate config={config} searchesLeft={searchesLeft} />
       </Panel>
 
       <Panel title="Your brand" subtitle="Matched by name, aliases and website">
@@ -347,6 +363,32 @@ export function SettingsView({ config, onDraftChange, onSave, suggestions, onTra
           </ul>
         )}
       </Panel>
+    </div>
+  );
+}
+
+/** Google serves 10 results per page and SerpApi bills each page, so depth drives the daily cost. */
+function CostEstimate({ config, searchesLeft }: { config: TrackingConfig; searchesLeft: number | null }) {
+  const keywords = config.keywords.filter((k) => k.active).length;
+  const pages = config.settings.resultDepth / 10;
+  // +1 AI Mode per keyword, +1 AI Overview when Google shows one (assume most of the time).
+  const perDayMax = keywords * (pages + 2);
+  const perMonth = perDayMax * 30;
+  const daysLeft = searchesLeft != null && perDayMax > 0 ? Math.floor(searchesLeft / perDayMax) : null;
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)" }}>
+      <span>
+        Runs daily at 03:00 UTC · {keywords} active keyword{keywords === 1 ? "" : "s"} × up to {pages + 2} searches (
+        {pages} result page{pages === 1 ? "" : "s"} + AI Overview + AI Mode) ≈{" "}
+        <strong style={{ color: "var(--text-primary)" }}>{perDayMax.toLocaleString("en-US")} searches/day</strong> ·{" "}
+        {perMonth.toLocaleString("en-US")}/month. Pages stop early when Google has no more results.
+      </span>
+      {daysLeft != null ? (
+        <span style={{ color: daysLeft < 30 ? "var(--status-critical)" : "var(--text-muted)" }}>
+          {searchesLeft?.toLocaleString("en-US")} searches left on the active SerpApi key - about {daysLeft} day
+          {daysLeft === 1 ? "" : "s"} at this depth before it rolls over to the next key.
+        </span>
+      ) : null}
     </div>
   );
 }

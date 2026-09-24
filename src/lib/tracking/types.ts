@@ -4,7 +4,12 @@ export interface TrackingSettings {
   /** Google `gl` parameter, e.g. "us" */
   country: string;
   device: "desktop" | "tablet" | "mobile";
+  /** How deep to track organic results. Google serves 10 per page, so each extra 10 costs one more SerpApi search. */
+  resultDepth: ResultDepth;
 }
+
+export const RESULT_DEPTHS = [10, 20, 30, 50, 100] as const;
+export type ResultDepth = (typeof RESULT_DEPTHS)[number];
 
 export interface TrackedKeyword {
   id: string;
@@ -42,6 +47,8 @@ export interface SourceRef {
   title: string;
   link: string;
   domain: string;
+  /** Site name as Google labels it (e.g. "Indochina Junk"), when SerpApi provides one. */
+  source?: string;
 }
 
 export interface OrganicResultSnapshot {
@@ -50,6 +57,7 @@ export interface OrganicResultSnapshot {
   link: string;
   domain: string;
   snippet: string;
+  source?: string;
 }
 
 export interface AiTextSnapshot {
@@ -76,6 +84,13 @@ export interface KeywordDailySnapshot {
   };
   searchesUsed: number;
   error?: string;
+  /** How many organic results were requested and how many 10-result pages it took. */
+  resultDepth?: number;
+  pagesFetched?: number;
+  /** Google rewrote the query (e.g. autocorrect) - the results are for this text instead. */
+  showingResultsFor?: string;
+  /** Page 1 barely matched the keyword even after a fresh retry - treat positions with caution. */
+  lowRelevance?: boolean;
 }
 
 export interface KeywordHistory {

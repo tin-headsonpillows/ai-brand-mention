@@ -1,4 +1,4 @@
-import { computeAiHit, computeOrganicHit } from "./visibility";
+import { computeAiHit, computeOrganicHit, isGoogleHost } from "./visibility";
 import type {
   AiTextSnapshot,
   BrandHit,
@@ -130,12 +130,19 @@ export function collectDates(histories: KeywordHistory[]): string[] {
   return Array.from(dates).sort();
 }
 
-function citationsIn(day: KeywordDailySnapshot, website: string, surfaces: Surface[]): number {
-  if (!website.trim()) return 0;
+function nameInTitle(title: string, def: TrackedBrand): boolean {
+  const t = title.toLowerCase();
+  return [def.name, ...def.aliases].some((n) => n.trim().length > 2 && t.includes(n.trim().toLowerCase()));
+}
+
+/** Links to the subject's site, plus Google-hosted sources (Business Profile, Maps) titled with its name. */
+function citationsIn(day: KeywordDailySnapshot, subject: Subject, surfaces: Surface[]): number {
+  const owns = (domain: string, title: string) =>
+    domainMatchesWebsite(domain, subject.website) || (isGoogleHost(domain) && nameInTitle(title, subject.def));
   let n = 0;
-  if (surfaces.includes("organic")) n += day.organicResults.filter((r) => domainMatchesWebsite(r.domain, website)).length;
-  if (surfaces.includes("aiOverview")) n += day.aiOverview.sources.filter((s) => domainMatchesWebsite(s.domain, website)).length;
-  if (surfaces.includes("aiMode")) n += day.aiMode.sources.filter((s) => domainMatchesWebsite(s.domain, website)).length;
+  if (surfaces.includes("organic")) n += day.organicResults.filter((r) => owns(r.domain, r.title)).length;
+  if (surfaces.includes("aiOverview")) n += day.aiOverview.sources.filter((src) => owns(src.domain, src.title)).length;
+  if (surfaces.includes("aiMode")) n += day.aiMode.sources.filter((src) => owns(src.domain, src.title)).length;
   return n;
 }
 
@@ -187,7 +194,7 @@ export function computeSubjectSeries(
           a.positionSum += dh.organicPosition;
           a.positionSamples++;
         }
-        a.citations += citationsIn(day, s.website, surfaces);
+        a.citations += citationsIn(day, s, surfaces);
       });
     }
   }
@@ -378,14 +385,16 @@ export interface RankCell {
   aiOverviewMatched: boolean;
   aiModeShown: boolean;
   aiModeMatched: boolean;
+  /** How deep that day's SERP was tracked, so "not found" can say "not in the top N". */
+  depth: number;
+  showingResultsFor: string | null;
+  lowRelevance: boolean;
 }
 
 export interface RankRow {
   keywordId: string;
   keyword: string;
   landingUrl: string | null;
-  best: { position: number; date: string } | null;
-  latest: RankCell | null;
   cells: Record<string, RankCell>;
 }
 
@@ -400,7 +409,6 @@ export function computeRankGrid(
     const days = h.days.filter((d) => !d.error).sort((a, b) => a.date.localeCompare(b.date));
     const cells: Record<string, RankCell> = {};
     let prev: RankCell | null = null;
-    let best: RankRow["best"] = null;
     let landingUrl: string | null = null;
 
     for (const day of days) {
@@ -415,18 +423,16 @@ export function computeRankGrid(
         aiOverviewMatched: dh.aiOverview.matched,
         aiModeShown: day.aiMode.present,
         aiModeMatched: dh.aiMode.matched,
+        depth: day.resultDepth ?? day.organicResults.length,
+        showingResultsFor: day.showingResultsFor ?? null,
+        lowRelevance: !!day.lowRelevance,
       };
       cells[day.date] = cell;
       prev = cell;
-      if (position != null) {
-        if (!best || position < best.position || (position === best.position && day.date > best.date)) {
-          best = { position, date: day.date };
-        }
-        landingUrl = day.organicResults.find((r) => r.position === position)?.link ?? landingUrl;
-      }
+      if (position != null) landingUrl = day.organicResults.find((r) => r.position === position)?.link ?? landingUrl;
     }
 
-    return { keywordId: h.keywordId, keyword: h.keyword, landingUrl, best, latest: prev, cells };
+    return { keywordId: h.keywordId, keyword: h.keyword, landingUrl, cells };
   });
   return { dates, rows };
 }
@@ -449,6 +455,46 @@ export function subjectsInResult(result: OrganicResultSnapshot, subjects: Subjec
   return found;
 }
 
+const GBP_UTM = /^(gbp|gmb|google[_-]?my[_-]?business|googlemybusiness|google[_-]?business([_-]?profile)?)$/i;
+
+/**
+ * Whether a cited link came through one of Google's own surfaces rather than straight from a site:
+ * Google-hosted pages (Search "search viewer" / Business Profile / Maps / Travel / Shopping), or
+ * third-party booking links Google injects from its feeds (Things to Do links carry
+ * utm_source=gttd and unfilled {surface}/{funnel} templates; Business Profile website buttons carry
+ * gbp/gmb UTM tags).
+ */
+export function googleVia(link: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(link.replace(/\{[^}]*\}/g, "x"));
+  } catch {
+    return null;
+  }
+  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+  const q = u.searchParams;
+  if (isGoogleHost(host)) {
+    if (host.startsWith("maps.") || host.endsWith("goo.gl") || u.pathname.startsWith("/maps")) return "Google Maps";
+    if (u.pathname.startsWith("/travel/hotels")) return "Google Hotels";
+    if (u.pathname.startsWith("/travel")) return "Google Travel";
+    if (u.pathname.startsWith("/shopping") || q.get("tbm") === "shop" || q.get("udm") === "28") return "Google Shopping";
+    if (q.has("ludocid") || q.has("lrd") || q.has("kgmid") || q.has("lsig") || (q.get("ibp") ?? "").startsWith("gwp")) {
+      return "Google Business Profile";
+    }
+    if (u.pathname.startsWith("/search") || u.pathname === "/") return "Google Search";
+    return "Google";
+  }
+  const utmSource = q.get("utm_source") ?? "";
+  // Operators hand Google's Things to Do feed URL templates; Google sometimes cites them with the
+  // placeholders still unfilled, which is a reliable fingerprint of that feed.
+  if (utmSource.toLowerCase() === "gttd" || /\{(surface|funnel|lang|currency|product_id|option_id)\}/.test(link)) {
+    return "Google Things to Do";
+  }
+  if (GBP_UTM.test(utmSource) || /^(gbp|gmb)\b/i.test(q.get("utm_campaign") ?? "")) return "Google Business Profile";
+  if (/^google[_-]?hotels?$|^google_hpa$/i.test(utmSource)) return "Google Hotels";
+  return null;
+}
+
 export interface DomainRow {
   domain: string;
   owner: Subject | null;
@@ -459,6 +505,8 @@ export interface DomainRow {
   keywords: number;
   total: number;
   sampleLink: string | null;
+  /** How many of this domain's appearances reached Google's answers through Google's own surfaces, by surface. */
+  googleVia: Record<string, number>;
   /** Best guess at the brand behind the domain, from its page titles - used when tracking it as a competitor. */
   siteName: string;
 }
@@ -470,9 +518,16 @@ const compact = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
  * Bay Cruises", "Halong Bay Cruises - Heritage Cruises"). Prefer a segment that spells the domain's own
  * label, then one repeated across the site's titles, then fall back to the domain label itself.
  */
-export function guessSiteName(domain: string, titles: string[]): string {
-  const labels = domain.split(".");
-  const label = (labels.length > 2 && labels[labels.length - 2].length <= 3 ? labels[labels.length - 3] : labels[labels.length - 2]) ?? domain;
+export function guessSiteName(domain: string, titles: string[], labels: string[] = []): string {
+  // Google's own label for the site (SerpApi `source`), unless it's just the hostname again.
+  const labelCounts = new Map<string, number>();
+  for (const l of labels) if (!/^[\w.-]+\.[a-z]{2,}$/i.test(l)) labelCounts.set(l, (labelCounts.get(l) ?? 0) + 1);
+  const topLabel = Array.from(labelCounts.entries()).sort((a, b) => b[1] - a[1])[0];
+  if (topLabel) return topLabel[0];
+
+  const hostParts = domain.split(".");
+  const label =
+    (hostParts.length > 2 && hostParts[hostParts.length - 2].length <= 3 ? hostParts[hostParts.length - 3] : hostParts[hostParts.length - 2]) ?? domain;
   const counts = new Map<string, number>();
   let domainMatch: string | null = null;
 
@@ -516,18 +571,31 @@ export function computeDomainRows(
   const isExcluded = (domain: string) => excludedDomains.some((ex) => domainMatchesWebsite(domain, ex));
   const byDomain = new Map<
     string,
-    { organic: number; positionSum: number; aio: number; aiMode: number; keywords: Set<string>; link: string | null; titles: Set<string> }
+    {
+      organic: number;
+      positionSum: number;
+      aio: number;
+      aiMode: number;
+      keywords: Set<string>;
+      link: string | null;
+      titles: Set<string>;
+      labels: string[];
+      via: Record<string, number>;
+    }
   >();
-  const entry = (domain: string, keyword: string, link: string, title: string) => {
+  const entry = (domain: string, keyword: string, link: string, title: string, label?: string) => {
     if (!domain) return null;
     if (isExcluded(domain)) return null;
     let e = byDomain.get(domain);
     if (!e) {
-      e = { organic: 0, positionSum: 0, aio: 0, aiMode: 0, keywords: new Set(), link, titles: new Set() };
+      e = { organic: 0, positionSum: 0, aio: 0, aiMode: 0, keywords: new Set(), link, titles: new Set(), labels: [], via: {} };
       byDomain.set(domain, e);
     }
     e.keywords.add(keyword);
     if (title) e.titles.add(title);
+    if (label) e.labels.push(label);
+    const via = googleVia(link);
+    if (via) e.via[via] = (e.via[via] ?? 0) + 1;
     return e;
   };
 
@@ -536,7 +604,7 @@ export function computeDomainRows(
       if (day.error) continue;
       if (surfaces.includes("organic")) {
         for (const r of day.organicResults) {
-          const e = entry(r.domain, h.keyword, r.link, r.title);
+          const e = entry(r.domain, h.keyword, r.link, r.title, r.source);
           if (e) {
             e.organic++;
             e.positionSum += r.position;
@@ -545,13 +613,13 @@ export function computeDomainRows(
       }
       if (surfaces.includes("aiOverview")) {
         for (const s of day.aiOverview.sources) {
-          const e = entry(s.domain, h.keyword, s.link, s.title);
+          const e = entry(s.domain, h.keyword, s.link, s.title, s.source);
           if (e) e.aio++;
         }
       }
       if (surfaces.includes("aiMode")) {
         for (const s of day.aiMode.sources) {
-          const e = entry(s.domain, h.keyword, s.link, s.title);
+          const e = entry(s.domain, h.keyword, s.link, s.title, s.source);
           if (e) e.aiMode++;
         }
       }
@@ -568,7 +636,8 @@ export function computeDomainRows(
     keywords: e.keywords.size,
     total: e.organic + e.aio + e.aiMode,
     sampleLink: e.link,
-    siteName: guessSiteName(domain, Array.from(e.titles)),
+    googleVia: e.via,
+    siteName: guessSiteName(domain, Array.from(e.titles), e.labels),
   }));
   rows.sort((a, b) => b.total - a.total || a.domain.localeCompare(b.domain));
   return rows;

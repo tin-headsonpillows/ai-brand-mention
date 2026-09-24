@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { readConfig, writeConfig } from "@/lib/tracking/store";
-import type { TrackedCompetitor, TrackingConfig } from "@/lib/tracking/types";
+import { RESULT_DEPTHS, type ResultDepth, type TrackedCompetitor, type TrackingConfig } from "@/lib/tracking/types";
 
 export async function GET() {
   const config = await readConfig();
@@ -27,6 +27,9 @@ export async function PUT(req: NextRequest) {
         language: String(input.settings.language || current.settings.language).trim() || "en",
         country: String(input.settings.country || current.settings.country).trim() || "us",
         device: isValidDevice(input.settings.device) ? input.settings.device : current.settings.device,
+        resultDepth: RESULT_DEPTHS.includes(Number(input.settings.resultDepth) as ResultDepth)
+          ? (Number(input.settings.resultDepth) as ResultDepth)
+          : current.settings.resultDepth,
       }
     : current.settings;
 

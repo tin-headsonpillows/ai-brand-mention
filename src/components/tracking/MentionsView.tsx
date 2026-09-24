@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { periodMetrics, seriesColor, type DomainRow, type SubjectSeries } from "@/lib/tracking/analytics";
 import { formatCount, formatPosition, trendTitle } from "@/lib/tracking/format";
+import { isGoogleHost } from "@/lib/tracking/visibility";
 import { Favicon } from "./Favicon";
 import { TrendChart } from "./TrendChart";
-import { ChartTableToggle, Delta, Headline, IconGlobe, IconLink, IconMessage, Panel, Switch, TrackButton, type ChartView } from "./ui";
+import { ChartTableToggle, Delta, Headline, IconGlobe, IconLink, IconMessage, Panel, Switch, TrackButton, GoogleViaBadge, type ChartView } from "./ui";
 
 interface MentionsViewProps {
   dates: string[];
@@ -199,7 +200,7 @@ export function MentionsView({
                     {i + 1}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Favicon domain={row.domain} size={16} />
                       <a
                         href={row.sampleLink ?? `https://${row.domain}`}
@@ -215,6 +216,9 @@ export function MentionsView({
                           {row.owner.isYourBrand ? "You" : row.owner.name}
                         </span>
                       ) : null}
+                      {Object.entries(row.googleVia).map(([via, n]) => (
+                        <GoogleViaBadge key={via} via={via} count={n} />
+                      ))}
                     </div>
                     <div className="mt-1.5 h-1 w-full max-w-48 rounded" style={{ background: "var(--gridline)" }}>
                       <div
@@ -242,7 +246,7 @@ export function MentionsView({
                     {row.keywords}
                   </td>
                   <td className="px-3 py-2">
-                    {row.owner ? null : (
+                    {row.owner || isGoogleHost(row.domain) ? null : (
                       <span className="flex items-center justify-end gap-1.5">
                         <TrackButton onClick={() => onTrack(row.domain)} />
                         <button

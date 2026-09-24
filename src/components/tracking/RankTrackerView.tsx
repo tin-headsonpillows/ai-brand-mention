@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   computeRankGrid,
+  googleVia,
   subjectsInResult,
   type HitLookup,
   type RankCell,
@@ -12,7 +13,7 @@ import { formatShortDate, formatWeekday, urlPath } from "@/lib/tracking/format";
 import type { KeywordHistory } from "@/lib/tracking/types";
 import { AiAnswerBlock, highlightSubjects } from "./AiAnswer";
 import { Favicon } from "./Favicon";
-import { EmptyState, IconHash, ModeMark, Panel, Segmented, SelectControl, SparkleMark, TrackButton } from "./ui";
+import { EmptyState, IconHash, ModeMark, Panel, Segmented, SelectControl, SparkleMark, TrackButton, GoogleViaBadge } from "./ui";
 
 interface RankTrackerViewProps {
   histories: KeywordHistory[];
@@ -63,16 +64,28 @@ function AiMarks({ cell }: { cell: RankCell }) {
   );
 }
 
-function PositionValue({ cell }: { cell: RankCell | null }) {
-  if (!cell) return <span style={{ color: "var(--text-muted)" }}>–</span>;
+function PositionValue({ cell }: { cell: RankCell }) {
   if (cell.position == null) {
+    const depth = cell.depth > 0 ? `top ${cell.depth}` : "the tracked results";
     return (
-      <span style={{ color: "var(--text-muted)" }} title={cell.droppedOut ? "Dropped out of the tracked results" : "Not in the tracked results"}>
-        –
+      <span style={{ color: "var(--text-muted)" }} title={cell.droppedOut ? `Dropped out of the ${depth}` : `Not in the ${depth}`}>
+        {cell.depth >= 20 ? `${cell.depth}+` : "–"}
       </span>
     );
   }
   return <span className="font-semibold tabular">{cell.position}</span>;
+}
+
+function SuspectMark({ cell }: { cell: RankCell }) {
+  if (!cell.lowRelevance && !cell.showingResultsFor) return null;
+  const why = cell.lowRelevance
+    ? "Google returned results that barely match this keyword (even on a fresh retry) - treat this day's position with caution"
+    : `Google showed results for "${cell.showingResultsFor}" instead`;
+  return (
+    <span aria-label={why} title={why} className="text-[11px] font-bold" style={{ color: "var(--status-serious)" }}>
+      ⚠
+    </span>
+  );
 }
 
 export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrack }: RankTrackerViewProps) {
@@ -124,7 +137,10 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
               <span className="flex items-center gap-1">
                 <ModeMark filled title="" /> in AI Mode
               </span>
-              <span>– not in the tracked results</span>
+              <span>100+ = not in the tracked results</span>
+              <span className="flex items-center gap-1">
+                <span style={{ color: "var(--status-serious)" }}>⚠</span> suspicious SERP
+              </span>
             </span>
             <span>Click a cell to inspect that day&apos;s SERP</span>
           </>
@@ -138,12 +154,6 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
                 style={{ background: "var(--surface-1)", borderColor: "var(--gridline)" }}
               >
                 Keyword
-              </th>
-              <th className="min-w-24 border-b border-l px-3 py-2 text-left font-medium" style={{ borderColor: "var(--gridline)", background: "var(--page-plane)" }}>
-                Best
-              </th>
-              <th className="min-w-24 border-b px-3 py-2 text-left font-medium" style={{ borderColor: "var(--gridline)", background: "var(--page-plane)" }}>
-                Latest
               </th>
               {grid.dates.map((d) => (
                 <th key={d} className="min-w-20 border-b border-l px-2 py-2 text-center font-medium" style={{ borderColor: "var(--gridline)" }}>
@@ -174,26 +184,6 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
                       {row.landingUrl ? urlPath(row.landingUrl) : `${subject.name} not in results`}
                     </div>
                   </td>
-                  <td className="border-b border-l px-3 py-2 align-top" style={{ borderColor: "var(--gridline)", background: "var(--page-plane)" }}>
-                    {row.best ? (
-                      <>
-                        <div className="font-semibold tabular" style={{ color: "var(--text-primary)" }}>
-                          {row.best.position}
-                        </div>
-                        <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                          {formatShortDate(row.best.date)}
-                        </div>
-                      </>
-                    ) : (
-                      <span style={{ color: "var(--text-muted)" }}>–</span>
-                    )}
-                  </td>
-                  <td className="border-b px-3 py-2 align-top" style={{ borderColor: "var(--gridline)", background: "var(--page-plane)" }}>
-                    <div className="flex items-center gap-1.5" style={{ color: "var(--text-primary)" }}>
-                      <PositionValue cell={row.latest} />
-                      {row.latest ? <ChangeBadge cell={row.latest} /> : null}
-                    </div>
-                  </td>
                   {grid.dates.map((d) => {
                     const cell = row.cells[d];
                     const selected = active?.keywordId === row.keywordId && active.date === d;
@@ -215,6 +205,7 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
                             <span className="flex items-baseline gap-1">
                               <PositionValue cell={cell} />
                               <ChangeBadge cell={cell} />
+                              <SuspectMark cell={cell} />
                             </span>
                             <AiMarks cell={cell} />
                           </button>
@@ -252,29 +243,48 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
             ]}
           />
 
+          {tab === "serp" && (activeDay.showingResultsFor || activeDay.lowRelevance) ? (
+            <p
+              className="rounded-lg border px-3 py-2 text-xs"
+              style={{ borderColor: "var(--status-serious)", color: "var(--text-primary)", background: "color-mix(in srgb, var(--status-serious) 8%, transparent)" }}
+            >
+              <span style={{ color: "var(--status-serious)" }}>⚠ </span>
+              {activeDay.showingResultsFor
+                ? `Google showed results for "${activeDay.showingResultsFor}" instead of the keyword.`
+                : "These results barely match the keyword even after a fresh retry - Google may have served the wrong page, so treat this day's positions with caution."}
+            </p>
+          ) : null}
+
           {tab === "serp" ? (
             activeDay.organicResults.length === 0 ? (
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 No organic results captured.
               </p>
             ) : (
-              <ol className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3">
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  Top {activeDay.organicResults.length} organic results
+                  {activeDay.pagesFetched ? ` · ${activeDay.pagesFetched} page${activeDay.pagesFetched === 1 ? "" : "s"} fetched` : ""}
+                </p>
+                <ol className="flex flex-col gap-3">
                 {activeDay.organicResults.map((r) => {
                   const tags = subjectsInResult(r, subjects);
                   const isTracked = tags.some((t) => t.owns && t.subject.id === subject.id);
+                  const via = googleVia(r.link);
                   return (
                     <li
                       key={`${r.position}-${r.link}`}
                       className="flex gap-3 rounded-lg p-2"
                       style={{ background: isTracked ? "color-mix(in srgb, var(--series-1) 8%, transparent)" : undefined }}
                     >
-                      <span className="w-5 shrink-0 pt-0.5 text-right text-sm tabular" style={{ color: "var(--text-muted)" }}>
+                      <span className="w-7 shrink-0 pt-0.5 text-right text-sm tabular" style={{ color: "var(--text-muted)" }}>
                         {r.position}.
                       </span>
                       <div className="flex min-w-0 flex-col gap-0.5">
                         <span className="flex flex-wrap items-center gap-1.5 text-xs" style={{ color: "var(--text-secondary)" }}>
                           <Favicon domain={r.domain} size={14} />
-                          <span className="max-w-full truncate">{r.domain}</span>
+                          <span className="max-w-full truncate">{r.source && !/\.[a-z]{2,}$/i.test(r.source) ? `${r.source} · ${r.domain}` : r.domain}</span>
+                          {via ? <GoogleViaBadge via={via} /> : null}
                           {tags.map(({ subject: o, owns }) => (
                             <span
                               key={o.id}
@@ -307,14 +317,17 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
                         <span className="truncate text-[11px]" style={{ color: "var(--success-text)" }}>
                           {r.link}
                         </span>
-                        <p className="line-clamp-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-                          {highlightSubjects(r.snippet, subjects)}
-                        </p>
+                        {r.snippet ? (
+                          <p className="line-clamp-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+                            {highlightSubjects(r.snippet, subjects)}
+                          </p>
+                        ) : null}
                       </div>
                     </li>
                   );
                 })}
-              </ol>
+                </ol>
+              </div>
             )
           ) : (
             <AiAnswerBlock

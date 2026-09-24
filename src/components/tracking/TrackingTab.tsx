@@ -17,6 +17,7 @@ import {
   type SurfaceFilter,
 } from "@/lib/tracking/analytics";
 import type { KeywordHistory, SerpUsage, TrackingConfig } from "@/lib/tracking/types";
+import { isGoogleHost } from "@/lib/tracking/visibility";
 import { Favicon } from "./Favicon";
 import { MentionsView } from "./MentionsView";
 import { OverviewView } from "./OverviewView";
@@ -51,10 +52,18 @@ const SURFACE_OPTIONS: Array<{ value: SurfaceFilter; label: string }> = [
   { value: "aiMode", label: SURFACE_LABEL.aiMode },
 ];
 
-async function fetchAll() {
+function sinceFor(range: Range): string | null {
+  if (range === "all") return null;
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - (Number(range) - 1));
+  return d.toISOString().slice(0, 10);
+}
+
+async function fetchAll(range: Range) {
+  const since = sinceFor(range);
   const [configRes, historyRes, usageRes] = await Promise.all([
     fetch("/api/tracking/config"),
-    fetch("/api/tracking/history"),
+    fetch(`/api/tracking/history${since ? `?since=${since}` : ""}`),
     fetch("/api/tracking/usage"),
   ]);
   const config = (await configRes.json()) as TrackingConfig;
@@ -77,9 +86,9 @@ export function TrackingTab() {
 
   useEffect(() => {
     let cancelled = false;
-    async function initialLoad() {
+    async function load() {
       try {
-        const data = await fetchAll();
+        const data = await fetchAll(range);
         if (cancelled) return;
         setConfig(data.config);
         setHistories(data.histories);
@@ -88,11 +97,11 @@ export function TrackingTab() {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load tracking data");
       }
     }
-    initialLoad();
+    load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [range]);
 
   const saveConfig = useCallback(async (next: TrackingConfig) => {
     setError(null);
@@ -131,7 +140,7 @@ export function TrackingTab() {
       setStatusMessage(
         `Done${body.mock ? " (mock data)" : ""} · ${body.totalSearchesUsed ?? 0} SerpApi searches used${failed > 0 ? ` · ${failed} keyword(s) failed` : ""}`
       );
-      const data = await fetchAll();
+      const data = await fetchAll(range);
       setConfig(data.config);
       setHistories(data.histories);
       setUsage(data.usage);
@@ -141,7 +150,7 @@ export function TrackingTab() {
     } finally {
       setRunning(false);
     }
-  }, []);
+  }, [range]);
 
   const subjects = useMemo(
     () => (config ? buildSubjects(config.brand, config.competitors) : []),
@@ -308,9 +317,10 @@ export function TrackingTab() {
           config={config}
           onDraftChange={setConfig}
           onSave={saveConfig}
-          suggestions={allDomains.filter((r) => !r.owner)}
+          suggestions={allDomains.filter((r) => !r.owner && !isGoogleHost(r.domain))}
           onTrack={trackDomain}
           onExclude={excludeDomain}
+          searchesLeft={usage && !usage.mock ? searchesLeft : null}
         />
       ) : needsSetup && !hasData ? (
         <EmptyState
