@@ -16,11 +16,12 @@ import {
   type AiSurface,
   type SurfaceFilter,
 } from "@/lib/tracking/analytics";
-import type { KeywordHistory, SerpUsage, TrackingConfig } from "@/lib/tracking/types";
+import type { KeywordHistory, ProjectSummary, SerpUsage, TrackingConfig } from "@/lib/tracking/types";
 import { isGoogleHost } from "@/lib/tracking/visibility";
 import { Favicon } from "./Favicon";
 import { MentionsView } from "./MentionsView";
 import { OverviewView } from "./OverviewView";
+import { ProjectBar, type NewProjectInput } from "./ProjectBar";
 import { RankTrackerView } from "./RankTrackerView";
 import { ResponsesView } from "./ResponsesView";
 import { SettingsView } from "./SettingsView";
@@ -59,13 +60,39 @@ function sinceFor(range: Range): string | null {
   return d.toISOString().slice(0, 10);
 }
 
-async function fetchAll(range: Range) {
+const PROJECT_STORAGE_KEY = "tracking.project";
+
+function rememberProject(id: string) {
+  try {
+    localStorage.setItem(PROJECT_STORAGE_KEY, id);
+  } catch {
+    // storage unavailable (private mode) - the project just won't be remembered
+  }
+}
+
+function rememberedProject(): string | null {
+  try {
+    return localStorage.getItem(PROJECT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchProjects(): Promise<ProjectSummary[]> {
+  const res = await fetch("/api/tracking/projects");
+  if (!res.ok) throw new Error(`Failed to load projects (status ${res.status})`);
+  return ((await res.json()) as { projects: ProjectSummary[] }).projects;
+}
+
+async function fetchAll(projectId: string, range: Range) {
   const since = sinceFor(range);
+  const project = encodeURIComponent(projectId);
   const [configRes, historyRes, usageRes] = await Promise.all([
-    fetch("/api/tracking/config"),
-    fetch(`/api/tracking/history${since ? `?since=${since}` : ""}`),
+    fetch(`/api/tracking/config?project=${project}`),
+    fetch(`/api/tracking/history?project=${project}${since ? `&since=${since}` : ""}`),
     fetch("/api/tracking/usage"),
   ]);
+  if (!configRes.ok || !historyRes.ok) throw new Error(`Failed to load project data (status ${configRes.ok ? historyRes.status : configRes.status})`);
   const config = (await configRes.json()) as TrackingConfig;
   const { histories } = (await historyRes.json()) as { histories: KeywordHistory[] };
   const usage = usageRes.ok ? ((await usageRes.json()) as SerpUsage) : null;
@@ -73,6 +100,8 @@ async function fetchAll(range: Range) {
 }
 
 export function TrackingTab() {
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [config, setConfig] = useState<TrackingConfig | null>(null);
   const [histories, setHistories] = useState<KeywordHistory[]>([]);
   const [usage, setUsage] = useState<SerpUsage | null>(null);
@@ -86,28 +115,87 @@ export function TrackingTab() {
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
+    async function loadProjects() {
       try {
-        const data = await fetchAll(range);
+        const list = await fetchProjects();
+        if (cancelled) return;
+        setProjects(list);
+        const remembered = rememberedProject();
+        setProjectId((current) => current ?? (list.some((p) => p.id === remembered) ? remembered : list[0]?.id ?? null));
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load projects");
+      }
+    }
+    loadProjects();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    async function load(id: string) {
+      try {
+        const data = await fetchAll(id, range);
         if (cancelled) return;
         setConfig(data.config);
         setHistories(data.histories);
         setUsage(data.usage);
+        setError(null);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load tracking data");
       }
     }
-    load();
+    load(projectId);
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [projectId, range]);
+
+  const selectProject = useCallback((id: string) => {
+    rememberProject(id);
+    setProjectId(id);
+    setStatusMessage(null);
+  }, []);
+
+  const createProject = useCallback(
+    async (input: NewProjectInput) => {
+      const res = await fetch("/api/tracking/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+      if (!res.ok || !body.id) throw new Error(body.error || `Couldn't create the project (status ${res.status})`);
+      setProjects(await fetchProjects());
+      selectProject(body.id);
+      setView("settings");
+      setStatusMessage("Project created - add keywords and competitors below, then run tracking.");
+    },
+    [selectProject]
+  );
+
+  const deleteProject = useCallback(async () => {
+    if (!projectId) return;
+    const res = await fetch(`/api/tracking/projects?project=${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      setError(body.error || `Couldn't delete the project (status ${res.status})`);
+      return;
+    }
+    const list = await fetchProjects();
+    setProjects(list);
+    if (list[0]) selectProject(list[0].id);
+    setView("overview");
+  }, [projectId, selectProject]);
 
   const saveConfig = useCallback(async (next: TrackingConfig) => {
+    if (!projectId) return;
     setError(null);
     setConfig(next);
     try {
-      const res = await fetch("/api/tracking/config", {
+      const res = await fetch(`/api/tracking/config?project=${encodeURIComponent(projectId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(next),
@@ -118,17 +206,31 @@ export function TrackingTab() {
       setHistories((prev) =>
         saved.keywords.map((k) => prev.find((h) => h.keywordId === k.id) ?? { keywordId: k.id, keyword: k.keyword, days: [] })
       );
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId
+            ? {
+                ...p,
+                name: saved.brand.name || saved.brand.website || p.name,
+                website: saved.brand.website,
+                settings: saved.settings,
+                keywordCount: saved.keywords.length,
+              }
+            : p
+        )
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
     }
-  }, []);
+  }, [projectId]);
 
   const runNow = useCallback(async () => {
+    if (!projectId) return;
     setRunning(true);
-    setStatusMessage("Running tracking for every active keyword…");
+    setStatusMessage("Running tracking for this project's active keywords…");
     setError(null);
     try {
-      const res = await fetch("/api/tracking/run", { method: "POST" });
+      const res = await fetch(`/api/tracking/run?project=${encodeURIComponent(projectId)}`, { method: "POST" });
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
         totalSearchesUsed?: number;
@@ -140,7 +242,7 @@ export function TrackingTab() {
       setStatusMessage(
         `Done${body.mock ? " (mock data)" : ""} · ${body.totalSearchesUsed ?? 0} SerpApi searches used${failed > 0 ? ` · ${failed} keyword(s) failed` : ""}`
       );
-      const data = await fetchAll(range);
+      const data = await fetchAll(projectId, range);
       setConfig(data.config);
       setHistories(data.histories);
       setUsage(data.usage);
@@ -150,7 +252,7 @@ export function TrackingTab() {
     } finally {
       setRunning(false);
     }
-  }, [range]);
+  }, [projectId, range]);
 
   const subjects = useMemo(
     () => (config ? buildSubjects(config.brand, config.competitors) : []),
@@ -212,15 +314,13 @@ export function TrackingTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
-            Google Search Tracking
-          </h2>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-2">
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            Daily rankings, AI Overview and AI Mode visibility for your keywords
+            Daily rankings, AI Overview and AI Mode visibility
             {allDates.length > 0 ? ` · last run ${allDates[allDates.length - 1]}` : ""}
           </p>
+          <ProjectBar projects={projects} activeId={projectId} onSelect={selectProject} onCreate={createProject} />
         </div>
         <div className="flex items-center gap-2">
           <span
@@ -321,6 +421,8 @@ export function TrackingTab() {
           onTrack={trackDomain}
           onExclude={excludeDomain}
           searchesLeft={usage && !usage.mock ? searchesLeft : null}
+          canDelete={projects.length > 1}
+          onDeleteProject={deleteProject}
         />
       ) : needsSetup && !hasData ? (
         <EmptyState

@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
-import { readConfig, writeConfig } from "@/lib/tracking/store";
+import { readConfig, resolveProject, writeConfig } from "@/lib/tracking/store";
 import { RESULT_DEPTHS, type ResultDepth, type TrackedCompetitor, type TrackingConfig } from "@/lib/tracking/types";
 
-export async function GET() {
-  const config = await readConfig();
-  return Response.json(config);
+export async function GET(req: NextRequest) {
+  const projectId = await resolveProject(req.nextUrl.searchParams.get("project"));
+  if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  return Response.json(await readConfig(projectId));
 }
 
 function isValidDevice(v: unknown): v is TrackingConfig["settings"]["device"] {
@@ -12,6 +13,8 @@ function isValidDevice(v: unknown): v is TrackingConfig["settings"]["device"] {
 }
 
 export async function PUT(req: NextRequest) {
+  const projectId = await resolveProject(req.nextUrl.searchParams.get("project"));
+  if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
   let body: unknown;
   try {
     body = await req.json();
@@ -20,7 +23,7 @@ export async function PUT(req: NextRequest) {
   }
 
   const input = body as Partial<TrackingConfig>;
-  const current = await readConfig();
+  const current = await readConfig(projectId);
 
   const settings = input.settings
     ? {
@@ -59,6 +62,6 @@ export async function PUT(req: NextRequest) {
     : current.excludedDomains;
 
   const next: TrackingConfig = { settings, brand, keywords, competitors, excludedDomains };
-  await writeConfig(next);
+  await writeConfig(projectId, next);
   return Response.json(next);
 }

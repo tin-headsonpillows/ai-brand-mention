@@ -7,7 +7,7 @@ import { TrackingTab } from "@/components/tracking/TrackingTab";
 type Tab = "chatgpt" | "tracking";
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>("chatgpt");
+  const [tab, setTab] = useState<Tab>("tracking");
 
   return (
     <div
@@ -20,17 +20,6 @@ export default function Home() {
         <div className="flex gap-1 border-b" style={{ borderColor: "var(--gridline)" }}>
           <button
             type="button"
-            onClick={() => setTab("chatgpt")}
-            className="border-b-2 px-3 py-2 text-sm font-medium"
-            style={{
-              borderColor: tab === "chatgpt" ? "var(--series-1)" : "transparent",
-              color: tab === "chatgpt" ? "var(--text-primary)" : "var(--text-muted)",
-            }}
-          >
-            ChatGPT Mentions
-          </button>
-          <button
-            type="button"
             onClick={() => setTab("tracking")}
             className="border-b-2 px-3 py-2 text-sm font-medium"
             style={{
@@ -39,6 +28,17 @@ export default function Home() {
             }}
           >
             Google Search Tracking
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("chatgpt")}
+            className="border-b-2 px-3 py-2 text-sm font-medium"
+            style={{
+              borderColor: tab === "chatgpt" ? "var(--series-1)" : "transparent",
+              color: tab === "chatgpt" ? "var(--text-primary)" : "var(--text-muted)",
+            }}
+          >
+            ChatGPT Mentions
           </button>
         </div>
       </header>

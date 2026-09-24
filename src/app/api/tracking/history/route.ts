@@ -1,6 +1,6 @@
 import { gzipSync } from "zlib";
 import type { NextRequest } from "next/server";
-import { readConfig, readHistory } from "@/lib/tracking/store";
+import { readConfig, readHistory, resolveProject } from "@/lib/tracking/store";
 import type { KeywordHistory } from "@/lib/tracking/types";
 
 /**
@@ -11,11 +11,13 @@ import type { KeywordHistory } from "@/lib/tracking/types";
 export async function GET(req: NextRequest) {
   const since = req.nextUrl.searchParams.get("since");
   const validSince = since && /^\d{4}-\d{2}-\d{2}$/.test(since) ? since : null;
-  const config = await readConfig();
+  const projectId = await resolveProject(req.nextUrl.searchParams.get("project"));
+  if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const config = await readConfig(projectId);
   const histories: KeywordHistory[] = [];
 
   for (const kw of config.keywords) {
-    const history = (await readHistory(kw.id)) ?? { keywordId: kw.id, keyword: kw.keyword, days: [] };
+    const history = (await readHistory(projectId, kw.id)) ?? { keywordId: kw.id, keyword: kw.keyword, days: [] };
     histories.push(validSince ? { ...history, days: history.days.filter((d) => d.date >= validSince) } : history);
   }
 

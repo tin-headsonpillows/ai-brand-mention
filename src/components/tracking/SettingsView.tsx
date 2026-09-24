@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { DomainRow } from "@/lib/tracking/analytics";
 import { formatPosition } from "@/lib/tracking/format";
 import { RESULT_DEPTHS, type ResultDepth, type TrackedCompetitor, type TrackingConfig } from "@/lib/tracking/types";
+import { COUNTRIES, LANGUAGES } from "@/lib/tracking/locales";
 import { Favicon } from "./Favicon";
 import { Panel, TrackButton, inputStyle } from "./ui";
 
@@ -17,39 +18,23 @@ interface SettingsViewProps {
   onExclude: (domain: string) => void;
   /** Searches left on the SerpApi key currently in use, if known. */
   searchesLeft: number | null;
+  canDelete: boolean;
+  onDeleteProject: () => void;
 }
-
-const LANGUAGES = [
-  ["en", "English"],
-  ["vi", "Vietnamese"],
-  ["es", "Spanish"],
-  ["fr", "French"],
-  ["de", "German"],
-  ["pt", "Portuguese"],
-  ["ja", "Japanese"],
-  ["ko", "Korean"],
-  ["zh-cn", "Chinese (Simplified)"],
-  ["th", "Thai"],
-] as const;
-
-const COUNTRIES = [
-  ["us", "United States"],
-  ["uk", "United Kingdom"],
-  ["vn", "Vietnam"],
-  ["au", "Australia"],
-  ["ca", "Canada"],
-  ["de", "Germany"],
-  ["fr", "France"],
-  ["jp", "Japan"],
-  ["kr", "South Korea"],
-  ["sg", "Singapore"],
-  ["th", "Thailand"],
-  ["in", "India"],
-] as const;
 
 const fieldLabel = "flex flex-col gap-1 text-xs";
 
-export function SettingsView({ config, onDraftChange, onSave, suggestions, onTrack, onExclude, searchesLeft }: SettingsViewProps) {
+export function SettingsView({
+  config,
+  onDraftChange,
+  onSave,
+  suggestions,
+  onTrack,
+  onExclude,
+  searchesLeft,
+  canDelete,
+  onDeleteProject,
+}: SettingsViewProps) {
   const [newKeywords, setNewKeywords] = useState("");
   const [filter, setFilter] = useState("");
 
@@ -72,12 +57,6 @@ export function SettingsView({ config, onDraftChange, onSave, suggestions, onTra
 
   const updateCompetitor = (id: string, patch: Partial<TrackedCompetitor>) =>
     onDraftChange({ ...config, competitors: config.competitors.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
-
-  const splitAliases = (value: string) =>
-    value
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -179,13 +158,12 @@ export function SettingsView({ config, onDraftChange, onSave, suggestions, onTra
         </div>
         <label className={fieldLabel} style={{ color: "var(--text-secondary)" }}>
           Aliases (comma-separated)
-          <input
-            value={config.brand.aliases.join(", ")}
-            onChange={(e) => onDraftChange({ ...config, brand: { ...config.brand, aliases: splitAliases(e.target.value) } })}
-            onBlur={() => onSave(config)}
+          <AliasInput
+            key={config.brand.aliases.join("\n")}
+            aliases={config.brand.aliases}
+            onCommit={(aliases) => onSave({ ...config, brand: { ...config.brand, aliases } })}
             placeholder="Bhaya, Bhaya Halong Cruise"
             className="rounded-lg border px-2.5 py-2 text-sm"
-            style={inputStyle}
           />
         </label>
       </Panel>
@@ -230,14 +208,15 @@ export function SettingsView({ config, onDraftChange, onSave, suggestions, onTra
                   </div>
                   <div className="flex items-center gap-2 pl-[26px] text-xs" style={{ color: "var(--text-muted)" }}>
                     <span className="shrink-0">{c.website || "no website"}</span>
-                    <input
-                      value={c.aliases.join(", ")}
-                      onChange={(e) => updateCompetitor(c.id, { aliases: splitAliases(e.target.value) })}
-                      onBlur={() => onSave(config)}
+                    <AliasInput
+                      key={c.aliases.join("\n")}
+                      aliases={c.aliases}
+                      onCommit={(aliases) =>
+                        onSave({ ...config, competitors: config.competitors.map((x) => (x.id === c.id ? { ...x, aliases } : x)) })
+                      }
                       placeholder="Other names it goes by (comma-separated)"
-                      aria-label="Competitor aliases"
+                      ariaLabel="Competitor aliases"
                       className="min-w-0 flex-1 rounded-md border px-2 py-1 text-xs"
-                      style={inputStyle}
                     />
                   </div>
                 </li>
@@ -363,6 +342,96 @@ export function SettingsView({ config, onDraftChange, onSave, suggestions, onTra
           </ul>
         )}
       </Panel>
+      <Panel title="Project" subtitle="Delete this project and all of its tracking history" className="xl:col-span-2">
+        <DeleteProject canDelete={canDelete} name={config.brand.name || config.brand.website || "this project"} onConfirm={onDeleteProject} />
+      </Panel>
+    </div>
+  );
+}
+
+function splitAliases(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Keeps the raw text while typing and parses it on blur/Enter. Parsing on every keystroke (as before)
+ * turned "Bhaya," straight back into "Bhaya", so a comma or a trailing space could never be typed and a
+ * second alias could never be started.
+ */
+function AliasInput({
+  aliases,
+  onCommit,
+  placeholder,
+  ariaLabel,
+  className,
+}: {
+  aliases: string[];
+  onCommit: (aliases: string[]) => void;
+  placeholder: string;
+  ariaLabel?: string;
+  className: string;
+}) {
+  const [text, setText] = useState(aliases.join(", "));
+  return (
+    <input
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        const next = splitAliases(text);
+        if (next.join("\n") !== aliases.join("\n")) onCommit(next);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      className={className}
+      style={inputStyle}
+    />
+  );
+}
+
+function DeleteProject({ canDelete, name, onConfirm }: { canDelete: boolean; name: string; onConfirm: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!canDelete) {
+    return (
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+        This is your only project - add another one before deleting this.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+        Removes {name}, its keywords, competitors and every tracked day. This can&apos;t be undone.
+      </p>
+      {confirming ? (
+        <span className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
+            style={{ background: "var(--status-critical)" }}
+          >
+            Yes, delete {name}
+          </button>
+          <button type="button" onClick={() => setConfirming(false)} className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
+          style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)" }}
+        >
+          Delete project
+        </button>
+      )}
     </div>
   );
 }

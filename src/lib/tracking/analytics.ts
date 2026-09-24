@@ -700,3 +700,53 @@ export function collectAiResponses(
   }
   return items;
 }
+
+export interface RankBucket {
+  key: string;
+  label: string;
+  count: number;
+  share: number;
+  /** Keywords in this bucket that moved up (or newly entered) / moved down since their previous tracked day. */
+  up: number;
+  down: number;
+}
+
+export interface RankOverview {
+  buckets: RankBucket[];
+  keywords: number;
+  latestDate: string | null;
+  depth: number;
+}
+
+/** Buckets each keyword's most recent position (Top 1-3 / 4-5 / 6-10 / 11-depth / not ranking) - the rank-tracker summary card. */
+export function computeRankOverview(grid: { dates: string[]; rows: RankRow[] }): RankOverview {
+  const latest = grid.rows
+    .map((row) => {
+      const date = grid.dates.find((d) => row.cells[d]);
+      return date ? row.cells[date] : null;
+    })
+    .filter((c): c is RankCell => c !== null);
+  const depth = Math.max(10, ...latest.map((c) => c.depth || 0));
+
+  const ranges: Array<{ key: string; label: string; min: number; max: number }> = [
+    { key: "1-3", label: "Top 1-3", min: 1, max: 3 },
+    { key: "4-5", label: "Top 4-5", min: 4, max: 5 },
+    { key: "6-10", label: "Top 6-10", min: 6, max: 10 },
+    ...(depth > 10 ? [{ key: "11+", label: `Top 11-${depth}`, min: 11, max: depth }] : []),
+  ];
+  const buckets: RankBucket[] = [
+    ...ranges.map((r) => ({ key: r.key, label: r.label, count: 0, share: 0, up: 0, down: 0 })),
+    { key: "out", label: `Not in top ${depth}`, count: 0, share: 0, up: 0, down: 0 },
+  ];
+
+  for (const cell of latest) {
+    const index = cell.position == null ? buckets.length - 1 : ranges.findIndex((r) => cell.position! >= r.min && cell.position! <= r.max);
+    const bucket = buckets[index === -1 ? buckets.length - 1 : index];
+    bucket.count++;
+    if (cell.enteredTop || (cell.delta ?? 0) > 0) bucket.up++;
+    if ((cell.delta ?? 0) < 0 || cell.droppedOut) bucket.down++;
+  }
+  for (const b of buckets) b.share = latest.length > 0 ? b.count / latest.length : 0;
+
+  return { buckets, keywords: latest.length, latestDate: grid.dates[0] ?? null, depth };
+}

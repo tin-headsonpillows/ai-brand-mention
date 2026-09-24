@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   computeRankGrid,
+  computeRankOverview,
   googleVia,
   subjectsInResult,
   type HitLookup,
@@ -13,6 +14,7 @@ import { formatShortDate, formatWeekday, urlPath } from "@/lib/tracking/format";
 import type { KeywordHistory } from "@/lib/tracking/types";
 import { AiAnswerBlock, highlightSubjects } from "./AiAnswer";
 import { Favicon } from "./Favicon";
+import { RankOverviewCard } from "./RankOverviewCard";
 import { EmptyState, IconHash, ModeMark, Panel, Segmented, SelectControl, SparkleMark, TrackButton, GoogleViaBadge } from "./ui";
 
 interface RankTrackerViewProps {
@@ -96,6 +98,7 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
   const subjectIndex = Math.max(0, subjects.findIndex((s) => s.id === subjectId));
   const subject = subjects[subjectIndex];
   const grid = useMemo(() => computeRankGrid(histories, subjectIndex, hits), [histories, subjectIndex, hits]);
+  const overview = useMemo(() => computeRankOverview(grid), [grid]);
 
   const selectionValid = !!selection && grid.rows.some((r) => r.keywordId === selection.keywordId && r.cells[selection.date]);
   const firstRow = grid.rows.find((r) => Object.keys(r.cells).length > 0);
@@ -110,7 +113,9 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
   }
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
+    <div className="flex flex-col gap-4">
+      <RankOverviewCard subject={subject} overview={overview} />
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
       <Panel
         icon={<IconHash />}
         title="Rank tracker"
@@ -339,6 +344,7 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
           )}
         </Panel>
       ) : null}
+      </div>
     </div>
   );
 }

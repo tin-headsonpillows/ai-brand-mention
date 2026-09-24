@@ -120,3 +120,12 @@ export interface RunResult {
   totalSearchesUsed: number;
   mock: boolean;
 }
+
+/** One tracked brand/site - each project has its own keywords, competitors, search settings and history. */
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  website: string;
+  settings: TrackingSettings;
+  keywordCount: number;
+}
