@@ -1,10 +1,17 @@
 "use client";
 
+import { Favicon } from "./Favicon";
 import type { DomainLeaderboardEntry } from "@/lib/tracking/types";
 
 const VISIBLE_ROWS = 15;
 
-export function DomainLeaderboard({ entries }: { entries: DomainLeaderboardEntry[] }) {
+export function DomainLeaderboard({
+  entries,
+  onExclude,
+}: {
+  entries: DomainLeaderboardEntry[];
+  onExclude: (domain: string) => void;
+}) {
   if (entries.length === 0) {
     return (
       <div
@@ -33,6 +40,7 @@ export function DomainLeaderboard({ entries }: { entries: DomainLeaderboardEntry
         </h3>
         <p className="text-xs" style={{ color: "var(--text-muted)" }}>
           Every domain seen in organic results or cited as an AI Overview / AI Mode source, ranked by total exposure.
+          Hide a blog or OTA you don&apos;t want counted.
         </p>
       </div>
 
@@ -57,6 +65,7 @@ export function DomainLeaderboard({ entries }: { entries: DomainLeaderboardEntry
             <th className="py-1 pl-2 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
               Keywords
             </th>
+            <th className="py-1 pl-2" />
           </tr>
         </thead>
         <tbody>
@@ -69,11 +78,7 @@ export function DomainLeaderboard({ entries }: { entries: DomainLeaderboardEntry
                 </td>
                 <td className="py-1.5" style={{ color: "var(--text-primary)" }}>
                   <span className="flex items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className="inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: entry.isYourBrand ? "var(--series-1)" : "var(--de-emphasis)" }}
-                    />
+                    <Favicon domain={entry.domain} />
                     <span className={entry.isYourBrand ? "font-semibold" : undefined}>{entry.domain}</span>
                     {entry.isYourBrand ? (
                       <span
@@ -81,6 +86,13 @@ export function DomainLeaderboard({ entries }: { entries: DomainLeaderboardEntry
                         style={{ background: "var(--gridline)", color: "var(--text-secondary)" }}
                       >
                         your brand
+                      </span>
+                    ) : entry.isCompetitor ? (
+                      <span
+                        className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                        style={{ background: "var(--meter-track)", color: "var(--series-1)" }}
+                      >
+                        {entry.competitorName}
                       </span>
                     ) : null}
                   </span>
@@ -107,6 +119,19 @@ export function DomainLeaderboard({ entries }: { entries: DomainLeaderboardEntry
                 </td>
                 <td className="py-1.5 pl-2 tabular" style={{ color: "var(--text-primary)" }}>
                   {entry.keywordsCitedIn}
+                </td>
+                <td className="py-1.5 pl-2 text-right">
+                  {entry.isYourBrand ? null : (
+                    <button
+                      type="button"
+                      onClick={() => onExclude(entry.domain)}
+                      className="text-xs"
+                      style={{ color: "var(--text-muted)" }}
+                      title="Hide this domain from the leaderboard"
+                    >
+                      Hide
+                    </button>
+                  )}
                 </td>
               </tr>
             );

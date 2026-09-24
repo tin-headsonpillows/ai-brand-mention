@@ -5,17 +5,21 @@ import { StatTile } from "@/components/StatTile";
 import { SerpResultsViewer } from "./SerpResultsViewer";
 import { VisibilityChart } from "./VisibilityChart";
 import { DomainLeaderboard } from "./DomainLeaderboard";
-import { BrandMentionLeaderboard } from "./BrandMentionLeaderboard";
+import { RankingsTable } from "./RankingsTable";
+import { VisibilityScoreCard } from "./VisibilityScoreCard";
+import { AvgPositionChart } from "./AvgPositionChart";
+import { ShareOfVoiceDonut } from "./ShareOfVoiceDonut";
 import { ContentBreakdownPanel } from "./ContentBreakdownPanel";
 import { MentionMomentsFeed } from "./MentionMomentsFeed";
 import { computeVisibilityTrend, latestSnapshot } from "@/lib/tracking/aggregate";
 import {
   collectBrandMentionMoments,
-  computeBrandMentionLeaderboard,
   computeContentBreakdown,
   computeDomainLeaderboard,
+  computeRankings,
+  computeSubjectTrends,
 } from "@/lib/tracking/marketAnalytics";
-import type { KeywordHistory, SerpUsage, TrackingConfig } from "@/lib/tracking/types";
+import type { KeywordHistory, SerpUsage, TrackedCompetitor, TrackingConfig } from "@/lib/tracking/types";
 
 const inputStyle: React.CSSProperties = {
   background: "var(--page-plane)",
@@ -163,6 +167,47 @@ export function TrackingTab() {
     [config, saveConfig]
   );
 
+  const addCompetitor = useCallback(() => {
+    if (!config) return;
+    const competitor: TrackedCompetitor = { id: crypto.randomUUID(), name: "", aliases: [], website: "" };
+    setConfig({ ...config, competitors: [...config.competitors, competitor] });
+  }, [config]);
+
+  const updateCompetitor = useCallback(
+    (id: string, patch: Partial<TrackedCompetitor>) => {
+      if (!config) return;
+      setConfig({
+        ...config,
+        competitors: config.competitors.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      });
+    },
+    [config]
+  );
+
+  const removeCompetitor = useCallback(
+    (id: string) => {
+      if (!config) return;
+      saveConfig({ ...config, competitors: config.competitors.filter((c) => c.id !== id) });
+    },
+    [config, saveConfig]
+  );
+
+  const excludeDomain = useCallback(
+    (domain: string) => {
+      if (!config || config.excludedDomains.includes(domain)) return;
+      saveConfig({ ...config, excludedDomains: [...config.excludedDomains, domain] });
+    },
+    [config, saveConfig]
+  );
+
+  const unexcludeDomain = useCallback(
+    (domain: string) => {
+      if (!config) return;
+      saveConfig({ ...config, excludedDomains: config.excludedDomains.filter((d) => d !== domain) });
+    },
+    [config, saveConfig]
+  );
+
   const trendPoints = useMemo(() => computeVisibilityTrend(histories), [histories]);
 
   const todaySummary = useMemo(() => {
@@ -192,13 +237,18 @@ export function TrackingTab() {
   }, [config, histories]);
 
   const domainLeaderboard = useMemo(
-    () => (config ? computeDomainLeaderboard(histories, config.brand) : []),
+    () => (config ? computeDomainLeaderboard(histories, config.brand, config.competitors, config.excludedDomains) : []),
     [histories, config]
   );
-  const brandMentionLeaderboard = useMemo(
-    () => (config ? computeBrandMentionLeaderboard(histories, config.brand) : []),
+  const rankings = useMemo(
+    () => (config ? computeRankings(histories, config.brand, config.competitors) : []),
     [histories, config]
   );
+  const subjectTrends = useMemo(
+    () => (config ? computeSubjectTrends(histories, config.brand, config.competitors) : []),
+    [histories, config]
+  );
+  const yourTrend = subjectTrends.find((t) => t.isYourBrand)?.points ?? [];
   const contentBreakdown = useMemo(() => computeContentBreakdown(histories), [histories]);
   const mentionMoments = useMemo(
     () => (config ? collectBrandMentionMoments(histories, config.brand) : []),
@@ -441,14 +491,109 @@ export function TrackingTab() {
         )}
       </Card>
 
+      <Card title="Competitors & excluded domains">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              Brands to rank yours against - applies retroactively to history already tracked.
+            </span>
+            <button
+              type="button"
+              onClick={addCompetitor}
+              className="rounded border px-3 py-1.5 text-xs font-medium"
+              style={{ borderColor: "var(--border-hairline)", color: "var(--text-primary)" }}
+            >
+              Add competitor
+            </button>
+          </div>
+          {config.competitors.length === 0 ? (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              No competitors yet - add one to see how you rank against the market.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {config.competitors.map((c) => (
+                <li key={c.id} className="grid grid-cols-1 gap-2 border-b pb-2 sm:grid-cols-[1fr_1fr_1fr_auto]" style={{ borderColor: "var(--gridline)" }}>
+                  <input
+                    value={c.name}
+                    onChange={(e) => updateCompetitor(c.id, { name: e.target.value })}
+                    onBlur={() => saveConfig(config)}
+                    placeholder="Competitor name"
+                    className="rounded border px-2 py-1.5 text-sm"
+                    style={inputStyle}
+                  />
+                  <input
+                    value={c.aliases.join(", ")}
+                    onChange={(e) => updateCompetitor(c.id, { aliases: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                    onBlur={() => saveConfig(config)}
+                    placeholder="Aliases (comma-separated)"
+                    className="rounded border px-2 py-1.5 text-sm"
+                    style={inputStyle}
+                  />
+                  <input
+                    value={c.website}
+                    onChange={(e) => updateCompetitor(c.id, { website: e.target.value })}
+                    onBlur={() => saveConfig(config)}
+                    placeholder="website.com"
+                    className="rounded border px-2 py-1.5 text-sm"
+                    style={inputStyle}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeCompetitor(c.id)}
+                    className="text-xs"
+                    style={{ color: "var(--status-critical)" }}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex flex-col gap-1 border-t pt-3" style={{ borderColor: "var(--gridline)" }}>
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              Excluded domains (blogs, OTAs, forums) - hidden from the cited-websites leaderboard.
+            </span>
+            {config.excludedDomains.length === 0 ? (
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                None yet - click &quot;Hide&quot; next to a domain below to exclude it.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {config.excludedDomains.map((d) => (
+                  <span
+                    key={d}
+                    className="flex items-center gap-1 rounded-full px-2 py-1 text-xs"
+                    style={{ background: "var(--page-plane)", color: "var(--text-secondary)" }}
+                  >
+                    {d}
+                    <button type="button" onClick={() => unexcludeDomain(d)} aria-label={`Un-exclude ${d}`} style={{ color: "var(--text-muted)" }}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+
       <VisibilityChart points={trendPoints} />
 
       <ContentBreakdownPanel breakdown={contentBreakdown} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <DomainLeaderboard entries={domainLeaderboard} />
-        <BrandMentionLeaderboard entries={brandMentionLeaderboard} />
+        <VisibilityScoreCard points={yourTrend} />
+        <RankingsTable subjects={rankings} />
       </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <AvgPositionChart trends={subjectTrends} />
+        <ShareOfVoiceDonut subjects={rankings} />
+      </div>
+
+      <DomainLeaderboard entries={domainLeaderboard} onExclude={excludeDomain} />
 
       <MentionMomentsFeed moments={mentionMoments} />
 

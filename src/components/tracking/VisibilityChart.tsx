@@ -15,8 +15,8 @@ interface Series {
 
 const SERIES: Series[] = [
   { key: "organicPct", label: "Organic results", color: "var(--series-1)" },
-  { key: "aiOverviewPct", label: "AI Overview", color: "#eb6834" },
-  { key: "aiModePct", label: "AI Mode", color: "#1baf7a" },
+  { key: "aiOverviewPct", label: "AI Overview", color: "var(--series-2)" },
+  { key: "aiModePct", label: "AI Mode", color: "var(--series-3)" },
 ];
 
 const WIDTH = 640;

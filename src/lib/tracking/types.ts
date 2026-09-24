@@ -20,10 +20,22 @@ export interface TrackedBrand {
   website: string;
 }
 
+export interface TrackedCompetitor {
+  id: string;
+  name: string;
+  aliases: string[];
+  /** Root domain, e.g. "marriott.com" (no protocol/www) */
+  website: string;
+}
+
 export interface TrackingConfig {
   settings: TrackingSettings;
   keywords: TrackedKeyword[];
   brand: TrackedBrand;
+  /** User-selected brands to rank against yours - applied retroactively to already-collected history, no extra API calls. */
+  competitors: TrackedCompetitor[];
+  /** Domains (blogs, OTAs, forums, ...) to hide from the cited-websites leaderboard, e.g. "reddit.com". */
+  excludedDomains: string[];
 }
 
 export interface SourceRef {
@@ -97,6 +109,8 @@ export interface RunResult {
 export interface DomainLeaderboardEntry {
   domain: string;
   isYourBrand: boolean;
+  isCompetitor: boolean;
+  competitorName: string | null;
   organicAppearances: number;
   avgOrganicPosition: number | null;
   aiOverviewCitations: number;
@@ -104,13 +118,35 @@ export interface DomainLeaderboardEntry {
   keywordsCitedIn: number;
 }
 
-export interface BrandMentionEntry {
+/** One tracked entity (your brand, or a configured competitor) ranked by exact name/alias/website matching against already-collected raw SERP data - no heuristic guessing. */
+export interface RankedSubject {
+  id: string;
+  name: string;
+  website: string;
+  isYourBrand: boolean;
+  /** Stable 1-8 categorical color slot tied to this subject's identity, not its current rank. */
+  colorSlot: number;
+  totalKeywordDays: number;
+  matchedDays: number;
+  visibilityPct: number;
+  organicMatchedDays: number;
+  aiOverviewMatchedDays: number;
+  aiModeMatchedDays: number;
+  avgOrganicPosition: number | null;
+}
+
+export interface SubjectDailyPoint {
+  date: string;
+  visibilityPct: number;
+  avgOrganicPosition: number | null;
+}
+
+export interface SubjectTrend {
+  id: string;
   name: string;
   isYourBrand: boolean;
-  mentionCount: number;
-  organicMentions: number;
-  aiOverviewMentions: number;
-  aiModeMentions: number;
+  colorSlot: number;
+  points: SubjectDailyPoint[];
 }
 
 export interface SurfaceBreakdown {

@@ -10,8 +10,8 @@ const SURFACE_LABEL: Record<MentionMoment["surface"], string> = {
 
 const SURFACE_COLOR: Record<MentionMoment["surface"], string> = {
   organic: "var(--series-1)",
-  aiOverview: "#eb6834",
-  aiMode: "#1baf7a",
+  aiOverview: "var(--series-2)",
+  aiMode: "var(--series-3)",
 };
 
 export function MentionMomentsFeed({ moments }: { moments: MentionMoment[] }) {

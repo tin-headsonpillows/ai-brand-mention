@@ -4,8 +4,8 @@ import type { ContentBreakdown, SurfaceBreakdown } from "@/lib/tracking/types";
 
 const SURFACES: Array<{ key: keyof ContentBreakdown; label: string; color: string }> = [
   { key: "organic", label: "Organic results", color: "var(--series-1)" },
-  { key: "aiOverview", label: "AI Overview", color: "#eb6834" },
-  { key: "aiMode", label: "AI Mode", color: "#1baf7a" },
+  { key: "aiOverview", label: "AI Overview", color: "var(--series-2)" },
+  { key: "aiMode", label: "AI Mode", color: "var(--series-3)" },
 ];
 
 function pct(part: number, total: number): string {

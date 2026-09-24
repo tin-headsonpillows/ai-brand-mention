@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { readConfig, writeConfig } from "@/lib/tracking/store";
-import type { TrackingConfig } from "@/lib/tracking/types";
+import type { TrackedCompetitor, TrackingConfig } from "@/lib/tracking/types";
 
 export async function GET() {
   const config = await readConfig();
@@ -42,7 +42,20 @@ export async function PUT(req: NextRequest) {
 
   const keywords = Array.isArray(input.keywords) ? input.keywords : current.keywords;
 
-  const next: TrackingConfig = { settings, brand, keywords };
+  const competitors: TrackedCompetitor[] = Array.isArray(input.competitors)
+    ? input.competitors.map((c) => ({
+        id: String(c?.id || crypto.randomUUID()),
+        name: String(c?.name ?? "").trim(),
+        aliases: Array.isArray(c?.aliases) ? c.aliases.map((a) => String(a).trim()).filter(Boolean) : [],
+        website: String(c?.website ?? "").trim(),
+      }))
+    : current.competitors;
+
+  const excludedDomains = Array.isArray(input.excludedDomains)
+    ? Array.from(new Set(input.excludedDomains.map((d) => String(d).trim().toLowerCase()).filter(Boolean)))
+    : current.excludedDomains;
+
+  const next: TrackingConfig = { settings, brand, keywords, competitors, excludedDomains };
   await writeConfig(next);
   return Response.json(next);
 }
