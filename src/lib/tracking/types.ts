@@ -8,7 +8,7 @@ export interface TrackingSettings {
   resultDepth: ResultDepth;
 }
 
-export const RESULT_DEPTHS = [10, 20, 30, 50, 100] as const;
+export const RESULT_DEPTHS = [10, 20] as const;
 export type ResultDepth = (typeof RESULT_DEPTHS)[number];
 
 export interface TrackedKeyword {

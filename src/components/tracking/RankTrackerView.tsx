@@ -137,7 +137,7 @@ export function RankTrackerView({ histories, subjects, hits, localeLabel, onTrac
               <span className="flex items-center gap-1">
                 <ModeMark filled title="" /> in AI Mode
               </span>
-              <span>100+ = not in the tracked results</span>
+              <span>20+ = not in the tracked results</span>
               <span className="flex items-center gap-1">
                 <span style={{ color: "var(--status-serious)" }}>⚠</span> suspicious SERP
               </span>

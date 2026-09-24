@@ -1,5 +1,5 @@
 import { get, put } from "@vercel/blob";
-import type { KeywordHistory, TrackingConfig } from "./types";
+import { RESULT_DEPTHS, type KeywordHistory, type TrackingConfig } from "./types";
 
 const CONFIG_PATH = "tracking/config.json";
 const HISTORY_PREFIX = "tracking/history";
@@ -30,7 +30,7 @@ async function writeJson(pathname: string, data: unknown): Promise<void> {
 
 function defaultConfig(): TrackingConfig {
   return {
-    settings: { language: "en", country: "us", device: "mobile", resultDepth: 100 },
+    settings: { language: "en", country: "us", device: "mobile", resultDepth: 20 },
     keywords: [],
     brand: { name: "", aliases: [], website: "" },
     competitors: [],
@@ -43,7 +43,10 @@ export async function readConfig(): Promise<TrackingConfig> {
   if (!config) return defaultConfig();
   // Backfill fields added after some configs were already saved to the blob store.
   const defaults = defaultConfig();
-  return { ...defaults, ...config, settings: { ...defaults.settings, ...config.settings } };
+  const settings = { ...defaults.settings, ...config.settings };
+  // Depths above 20 were briefly allowed; anything outside the current options falls back to 20.
+  if (!RESULT_DEPTHS.includes(settings.resultDepth)) settings.resultDepth = defaults.settings.resultDepth;
+  return { ...defaults, ...config, settings };
 }
 
 export async function writeConfig(config: TrackingConfig): Promise<void> {

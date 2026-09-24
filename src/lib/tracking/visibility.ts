@@ -4,7 +4,7 @@ function normalize(s: string): string {
   return s.toLowerCase().trim();
 }
 
-// Tracking up to 100 results x every brand x every day means the same few name patterns get tested
+// Every tracked result x every brand x every day means the same few name patterns get tested
 // hundreds of thousands of times, so compile each once.
 const namePatterns = new Map<string, RegExp>();
 

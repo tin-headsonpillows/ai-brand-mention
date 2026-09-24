@@ -4,7 +4,7 @@ import { readConfig, readHistory } from "@/lib/tracking/store";
 import type { KeywordHistory } from "@/lib/tracking/types";
 
 /**
- * Tracking up to 100 results per keyword per day makes history large, and Vercel caps a function's
+ * Tracking many results per keyword per day makes history large, and Vercel caps a function's
  * response body at 4.5 MB - so the client asks only for its selected range (`since=YYYY-MM-DD`) and the
  * body is sent gzipped (this JSON compresses roughly 8-10x).
  */
