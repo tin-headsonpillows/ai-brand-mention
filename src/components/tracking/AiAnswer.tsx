@@ -1,0 +1,122 @@
+"use client";
+
+import { Fragment, type ReactNode } from "react";
+import { domainMatchesWebsite, type Subject } from "@/lib/tracking/analytics";
+import type { AiTextSnapshot, SourceRef } from "@/lib/tracking/types";
+import { Favicon } from "./Favicon";
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Wraps every subject name/alias in the text with a tinted mark - your brand in the accent tint, competitors in neutral. */
+export function highlightSubjects(text: string, subjects: Subject[], enabled = true): ReactNode {
+  if (!enabled) return text;
+  const terms = subjects.flatMap((s) =>
+    [s.def.name, ...s.def.aliases].filter((t) => t.trim()).map((t) => ({ term: t.trim(), subject: s }))
+  );
+  if (terms.length === 0 || !text) return text;
+  terms.sort((a, b) => b.term.length - a.term.length);
+  const pattern = new RegExp(`\\b(${terms.map((t) => escapeRegExp(t.term)).join("|")})\\b`, "gi");
+  return text.split(pattern).map((part, i) => {
+    const match = terms.find((t) => t.term.toLowerCase() === part.toLowerCase());
+    if (!match) return <Fragment key={i}>{part}</Fragment>;
+    return (
+      <mark
+        key={i}
+        className="rounded px-0.5 font-semibold"
+        style={{
+          background: match.subject.isYourBrand
+            ? "color-mix(in srgb, var(--series-1) 20%, transparent)"
+            : "color-mix(in srgb, var(--text-muted) 18%, transparent)",
+          color: "var(--text-primary)",
+        }}
+      >
+        {part}
+      </mark>
+    );
+  });
+}
+
+export function AnswerText({ text, subjects, highlight = true }: { text: string; subjects: Subject[]; highlight?: boolean }) {
+  const lines = text.split("\n").filter((l) => l.trim());
+  return (
+    <div className="flex flex-col gap-2.5 text-sm leading-relaxed" style={{ color: "var(--text-primary)" }}>
+      {lines.map((line, i) =>
+        line.startsWith("- ") ? (
+          <p key={i} className="flex gap-2 pl-2">
+            <span aria-hidden style={{ color: "var(--text-muted)" }}>
+              •
+            </span>
+            <span>{highlightSubjects(line.slice(2), subjects, highlight)}</span>
+          </p>
+        ) : (
+          <p key={i}>{highlightSubjects(line, subjects, highlight)}</p>
+        )
+      )}
+    </div>
+  );
+}
+
+export function SourceList({ sources, subjects }: { sources: SourceRef[]; subjects: Subject[] }) {
+  if (sources.length === 0) {
+    return (
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+        No sources listed.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-2">
+      {sources.map((s, i) => {
+        const owner = subjects.find((sub) => domainMatchesWebsite(s.domain, sub.website));
+        return (
+          <li key={`${s.link}-${i}`}>
+            <a
+              href={s.link}
+              target="_blank"
+              rel="noreferrer"
+              className="flex flex-col gap-0.5 rounded-lg border p-2.5 hover:opacity-90"
+              style={{
+                borderColor: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 45%, transparent)" : "var(--border-hairline)",
+                background: owner?.isYourBrand ? "color-mix(in srgb, var(--series-1) 7%, transparent)" : "var(--surface-1)",
+              }}
+            >
+              <span className="flex items-center gap-2">
+                <Favicon domain={s.domain} />
+                <span className="line-clamp-1 text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+                  {s.title || s.domain}
+                </span>
+              </span>
+              <span className="line-clamp-1 pl-6 text-[11px]" style={{ color: "var(--text-muted)" }}>
+                {s.domain}
+                {owner ? ` · ${owner.isYourBrand ? "your site" : owner.name}` : ""}
+              </span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export function AiAnswerBlock({ answer, subjects, emptyLabel }: { answer: AiTextSnapshot; subjects: Subject[]; emptyLabel: string }) {
+  if (!answer.present || !answer.text) {
+    return (
+      <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+        {emptyLabel}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <AnswerText text={answer.text} subjects={subjects} />
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
+          Sources ({answer.sources.length})
+        </span>
+        <SourceList sources={answer.sources} subjects={subjects} />
+      </div>
+    </div>
+  );
+}

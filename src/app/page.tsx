@@ -10,7 +10,9 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>("chatgpt");
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-10 sm:px-6">
+    <div
+      className={`mx-auto flex w-full flex-1 flex-col gap-6 px-4 py-10 sm:px-6 ${tab === "tracking" ? "max-w-[1440px]" : "max-w-4xl"}`}
+    >
       <header className="flex flex-col gap-3">
         <h1 className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>
           AI Brand Mention Tracker
