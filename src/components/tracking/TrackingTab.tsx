@@ -4,7 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatTile } from "@/components/StatTile";
 import { SerpResultsViewer } from "./SerpResultsViewer";
 import { VisibilityChart } from "./VisibilityChart";
+import { DomainLeaderboard } from "./DomainLeaderboard";
+import { BrandMentionLeaderboard } from "./BrandMentionLeaderboard";
+import { ContentBreakdownPanel } from "./ContentBreakdownPanel";
+import { MentionMomentsFeed } from "./MentionMomentsFeed";
 import { computeVisibilityTrend, latestSnapshot } from "@/lib/tracking/aggregate";
+import {
+  collectBrandMentionMoments,
+  computeBrandMentionLeaderboard,
+  computeContentBreakdown,
+  computeDomainLeaderboard,
+} from "@/lib/tracking/marketAnalytics";
 import type { KeywordHistory, SerpUsage, TrackingConfig } from "@/lib/tracking/types";
 
 const inputStyle: React.CSSProperties = {
@@ -180,6 +190,20 @@ export function TrackingTab() {
       total: active.length,
     };
   }, [config, histories]);
+
+  const domainLeaderboard = useMemo(
+    () => (config ? computeDomainLeaderboard(histories, config.brand) : []),
+    [histories, config]
+  );
+  const brandMentionLeaderboard = useMemo(
+    () => (config ? computeBrandMentionLeaderboard(histories, config.brand) : []),
+    [histories, config]
+  );
+  const contentBreakdown = useMemo(() => computeContentBreakdown(histories), [histories]);
+  const mentionMoments = useMemo(
+    () => (config ? collectBrandMentionMoments(histories, config.brand) : []),
+    [histories, config]
+  );
 
   const selectedHistory = histories.find((h) => h.keywordId === selectedKeywordId) ?? null;
   const selectedSnapshot = selectedHistory ? latestSnapshot(selectedHistory) : null;
@@ -418,6 +442,15 @@ export function TrackingTab() {
       </Card>
 
       <VisibilityChart points={trendPoints} />
+
+      <ContentBreakdownPanel breakdown={contentBreakdown} />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <DomainLeaderboard entries={domainLeaderboard} />
+        <BrandMentionLeaderboard entries={brandMentionLeaderboard} />
+      </div>
+
+      <MentionMomentsFeed moments={mentionMoments} />
 
       {selectedKeyword ? (
         <SerpResultsViewer keyword={selectedKeyword.keyword} snapshot={selectedSnapshot} brand={config.brand} />

@@ -93,3 +93,48 @@ export interface RunResult {
   totalSearchesUsed: number;
   mock: boolean;
 }
+
+export interface DomainLeaderboardEntry {
+  domain: string;
+  isYourBrand: boolean;
+  organicAppearances: number;
+  avgOrganicPosition: number | null;
+  aiOverviewCitations: number;
+  aiModeCitations: number;
+  keywordsCitedIn: number;
+}
+
+export interface BrandMentionEntry {
+  name: string;
+  isYourBrand: boolean;
+  mentionCount: number;
+  organicMentions: number;
+  aiOverviewMentions: number;
+  aiModeMentions: number;
+}
+
+export interface SurfaceBreakdown {
+  totalKeywordDays: number;
+  /** Days the surface itself showed anything (organic results exist / AI Overview or AI Mode rendered). */
+  presentDays: number;
+  brandMatchedDays: number;
+  avgOrganicPosition: number | null;
+  matchedByName: number;
+  matchedByAlias: number;
+  matchedByWebsite: number;
+}
+
+export interface ContentBreakdown {
+  organic: SurfaceBreakdown;
+  aiOverview: SurfaceBreakdown;
+  aiMode: SurfaceBreakdown;
+}
+
+export interface MentionMoment {
+  date: string;
+  keyword: string;
+  surface: "organic" | "aiOverview" | "aiMode";
+  excerpt: string;
+  link: string | null;
+  domain: string | null;
+}

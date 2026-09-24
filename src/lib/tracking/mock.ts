@@ -58,7 +58,7 @@ export function mockTrackKeyword(keyword: string, brand: TrackedBrand): KeywordD
       domain: `${slug(name)}.example.com`,
     })),
   };
-  const aiMode: AiTextSnapshot = { ...aiOverview, text: `AI Mode: ${aiText}` };
+  const aiMode: AiTextSnapshot = { ...aiOverview, text: `${aiText} Results may vary by traveler preference and season.` };
 
   return {
     date: todayDateString(),
