@@ -214,7 +214,13 @@ export function TrackingTab() {
         <StatTile
           label="SerpApi searches left"
           value={usage?.planSearchesLeft != null ? String(usage.planSearchesLeft) : "-"}
-          sublabel={usage?.mock ? "mock data" : usage?.planId ?? undefined}
+          sublabel={
+            usage?.mock
+              ? "mock data"
+              : usage && usage.keyPoolSize > 1
+                ? `key ${(usage.activeKeyIndex ?? 0) + 1} of ${usage.keyPoolSize}`
+                : usage?.planId ?? undefined
+          }
         />
         <StatTile
           label="Used this month"

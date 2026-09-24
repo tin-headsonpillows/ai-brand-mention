@@ -3,11 +3,6 @@ import type { AiTextSnapshot, OrganicResultSnapshot, SerpUsage, SourceRef, Track
 const BASE_URL = "https://serpapi.com/search.json";
 const ACCOUNT_URL = "https://serpapi.com/account.json";
 
-/** This feature uses a server-side key only (set once by the deployer), not a visitor-supplied one. */
-export function isSerpTrackingConfigured(): boolean {
-  return !!process.env.SERPAPI_API_KEY;
-}
-
 export function extractDomain(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
@@ -185,5 +180,20 @@ export async function fetchAccountUsage(apiKey: string): Promise<SerpUsage> {
     thisMonthUsage: num(data.this_month_usage),
     searchesPerMonth: num(data.searches_per_month),
     mock: false,
+    activeKeyIndex: null,
+    keyPoolSize: 1,
   };
+}
+
+/** Reports usage for whichever configured key still has searches left, so the UI reflects the key actually in use. */
+export async function fetchActiveAccountUsage(keys: string[]): Promise<SerpUsage> {
+  let last: SerpUsage | null = null;
+  for (let i = 0; i < keys.length; i++) {
+    const usage = await fetchAccountUsage(keys[i]);
+    last = usage;
+    const left = usage.totalSearchesLeft ?? usage.planSearchesLeft ?? 0;
+    if (left > 0) return { ...usage, activeKeyIndex: i, keyPoolSize: keys.length };
+  }
+  if (!last) throw new Error("No SerpApi keys configured");
+  return { ...last, activeKeyIndex: keys.length - 1, keyPoolSize: keys.length };
 }

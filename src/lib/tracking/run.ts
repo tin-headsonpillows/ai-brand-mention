@@ -1,3 +1,4 @@
+import type { ServerKeyRotator } from "@/lib/serpKeyPool";
 import { fetchAiMode, fetchAiOverview, fetchOrganic } from "./serpapi";
 import { computeAiHit, computeOrganicHit } from "./visibility";
 import type { AiTextSnapshot, KeywordDailySnapshot, TrackedBrand, TrackedKeyword, TrackingSettings } from "./types";
@@ -14,24 +15,26 @@ export async function trackKeyword(
   keyword: TrackedKeyword,
   settings: TrackingSettings,
   brand: TrackedBrand,
-  apiKey: string
+  rotator: ServerKeyRotator
 ): Promise<KeywordDailySnapshot> {
   let searchesUsed = 0;
   try {
-    const { organicResults, aiOverviewPageToken } = await fetchOrganic(keyword.keyword, settings, apiKey);
+    const { organicResults, aiOverviewPageToken } = await rotator.run((key) =>
+      fetchOrganic(keyword.keyword, settings, key)
+    );
     searchesUsed++;
 
     let aiOverview = EMPTY_AI;
     if (aiOverviewPageToken) {
       try {
-        aiOverview = await fetchAiOverview(aiOverviewPageToken, apiKey);
+        aiOverview = await rotator.run((key) => fetchAiOverview(aiOverviewPageToken, key));
         searchesUsed++;
       } catch {
         // page_token can expire between the two calls; leave AI Overview empty rather than failing the run.
       }
     }
 
-    const aiMode = await fetchAiMode(keyword.keyword, settings, apiKey);
+    const aiMode = await rotator.run((key) => fetchAiMode(keyword.keyword, settings, key));
     searchesUsed++;
 
     return {

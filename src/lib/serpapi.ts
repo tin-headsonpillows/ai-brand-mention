@@ -1,9 +1,10 @@
+import { getSharedRotator, hasServerApiKeys } from "./serpKeyPool";
 import type { SerpLocalResult } from "./types";
 
 const SERPAPI_BASE_URL = "https://serpapi.com/search.json";
 
 export function isSerpConfigured(userApiKey?: string): boolean {
-  return !!userApiKey?.trim() || !!process.env.SERPAPI_API_KEY;
+  return !!userApiKey?.trim() || hasServerApiKeys();
 }
 
 interface RawLocalResult {
@@ -24,15 +25,12 @@ function normalizeLocalResults(raw: RawLocalResult[] | undefined): RawLocalResul
   return Array.isArray(raw) ? raw : [];
 }
 
-async function fetchSerpEngine(
+async function fetchSerpEngineWithKey(
   engine: "google_local" | "google_maps",
   query: string,
   location: string,
-  userApiKey?: string
+  apiKey: string
 ): Promise<SerpLocalResult[]> {
-  const apiKey = userApiKey?.trim() || process.env.SERPAPI_API_KEY;
-  if (!apiKey) return [];
-
   const params = new URLSearchParams({ engine, q: query, api_key: apiKey, hl: "en" });
   if (engine === "google_local") {
     params.set("location", location);
@@ -63,6 +61,20 @@ async function fetchSerpEngine(
       source: engine,
     }))
     .filter((r) => r.name.length > 0);
+}
+
+async function fetchSerpEngine(
+  engine: "google_local" | "google_maps",
+  query: string,
+  location: string,
+  userApiKey?: string
+): Promise<SerpLocalResult[]> {
+  const trimmedUserKey = userApiKey?.trim();
+  if (trimmedUserKey) {
+    return fetchSerpEngineWithKey(engine, query, location, trimmedUserKey);
+  }
+  if (!hasServerApiKeys()) return [];
+  return getSharedRotator().run((key) => fetchSerpEngineWithKey(engine, query, location, key));
 }
 
 /** Fetches and merges Google Local + Google Maps results for a query/location, deduping by name. */

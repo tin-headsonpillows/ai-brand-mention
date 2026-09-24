@@ -81,6 +81,9 @@ export interface SerpUsage {
   thisMonthUsage: number | null;
   searchesPerMonth: number | null;
   mock: boolean;
+  /** Index into the configured key pool of the key currently serving requests, if known. */
+  activeKeyIndex: number | null;
+  keyPoolSize: number;
 }
 
 export interface RunResult {

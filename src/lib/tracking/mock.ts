@@ -84,5 +84,7 @@ export function mockAccountUsage(): SerpUsage {
     thisMonthUsage: 13,
     searchesPerMonth: 100,
     mock: true,
+    activeKeyIndex: null,
+    keyPoolSize: 0,
   };
 }
