@@ -25,20 +25,15 @@ function normalizeLocalResults(raw: RawLocalResult[] | undefined): RawLocalResul
   return Array.isArray(raw) ? raw : [];
 }
 
+// The place goes in the query text ("... in Da Nang") rather than SerpApi's `location` parameter, which only
+// accepts its own canonical location names and fails the whole search on anything else.
 async function fetchSerpEngineWithKey(
   engine: "google_local" | "google_maps",
   query: string,
-  location: string,
   apiKey: string
 ): Promise<SerpLocalResult[]> {
   const params = new URLSearchParams({ engine, q: query, api_key: apiKey, hl: "en" });
-  if (engine === "google_local") {
-    params.set("location", location);
-  } else {
-    params.set("type", "search");
-    params.set("location", location);
-    params.set("z", "13");
-  }
+  if (engine === "google_maps") params.set("type", "search");
 
   const res = await fetch(`${SERPAPI_BASE_URL}?${params.toString()}`);
   if (!res.ok) {
@@ -66,22 +61,21 @@ async function fetchSerpEngineWithKey(
 async function fetchSerpEngine(
   engine: "google_local" | "google_maps",
   query: string,
-  location: string,
   userApiKey?: string
 ): Promise<SerpLocalResult[]> {
   const trimmedUserKey = userApiKey?.trim();
   if (trimmedUserKey) {
-    return fetchSerpEngineWithKey(engine, query, location, trimmedUserKey);
+    return fetchSerpEngineWithKey(engine, query, trimmedUserKey);
   }
   if (!hasServerApiKeys()) return [];
-  return getSharedRotator().run((key) => fetchSerpEngineWithKey(engine, query, location, key));
+  return getSharedRotator().run((key) => fetchSerpEngineWithKey(engine, query, key));
 }
 
-/** Fetches and merges Google Local + Google Maps results for a query/location, deduping by name. */
-export async function fetchLocalResults(query: string, location: string, apiKey?: string): Promise<SerpLocalResult[]> {
+/** Fetches and merges Google Local + Google Maps results for a query that names its place, deduping by name. */
+export async function fetchLocalResults(query: string, apiKey?: string): Promise<SerpLocalResult[]> {
   const [local, maps] = await Promise.all([
-    fetchSerpEngine("google_local", query, location, apiKey).catch(() => [] as SerpLocalResult[]),
-    fetchSerpEngine("google_maps", query, location, apiKey).catch(() => [] as SerpLocalResult[]),
+    fetchSerpEngine("google_local", query, apiKey).catch(() => [] as SerpLocalResult[]),
+    fetchSerpEngine("google_maps", query, apiKey).catch(() => [] as SerpLocalResult[]),
   ]);
   return dedupe([...local, ...maps]);
 }

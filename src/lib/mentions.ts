@@ -28,3 +28,12 @@ export function splitList(value?: string): string[] {
   }
   return out;
 }
+
+/** Whether a leaderboard name refers to the brand (either contains the other), matching any of its terms. */
+export function matchesBrand(name: string, brandTerms: string[]): boolean {
+  const lower = name.toLowerCase();
+  return brandTerms.some((t) => {
+    const term = t.trim().toLowerCase();
+    return term !== "" && (lower.includes(term) || term.includes(lower));
+  });
+}

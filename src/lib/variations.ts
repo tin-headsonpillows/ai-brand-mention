@@ -10,7 +10,8 @@ export async function generateVariations(
   count: number,
   model: string,
   mock: boolean,
-  apiKey?: string
+  apiKey?: string,
+  location?: string
 ): Promise<string[]> {
   if (mock) return mockVariations(seedPrompt, count);
 
@@ -18,6 +19,11 @@ export async function generateVariations(
     "You are helping test how an AI assistant answers a family of related, realistic user questions.",
     `Given one example question, generate exactly ${count} DIFFERENT ways real people might ask about the same underlying need.`,
     "Vary phrasing, specificity, and constraints (budget, trip length, group size, season, neighborhood, etc.), but keep the same core topic and intent as the example.",
+    ...(location
+      ? [
+          `Every variation must be explicitly about ${location}: name "${location}" (or its common local spelling) in each one, and never switch to or add a different city or region.`,
+        ]
+      : []),
     "Do not answer the questions themselves.",
     `Return ONLY a JSON object of the shape {"variations": string[]} with exactly ${count} items, no commentary.`,
   ].join(" ");

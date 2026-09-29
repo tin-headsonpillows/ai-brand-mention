@@ -74,8 +74,7 @@ export function SerpComparisonView({ comparison }: SerpComparisonViewProps) {
           ChatGPT vs. Google local results
         </h3>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Comparing businesses ChatGPT mentioned against Google&apos;s local pack for &quot;{query}&quot; near{" "}
-          {location}.
+          Comparing businesses ChatGPT mentioned in {location} against Google&apos;s local pack for &quot;{query}&quot;.
         </p>
         {mock ? (
           <p className="text-xs" style={{ color: "var(--status-warning)" }}>

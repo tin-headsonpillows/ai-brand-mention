@@ -71,20 +71,33 @@ const BLURBS = [
   "a solid option if you want something reliable",
 ];
 
+// Chains recur across locations so the brand roll-up has something to group in mock mode.
+const MOCK_MARKET_NAMES = [
+  (loc: string) => `InterContinental ${loc} Resort`,
+  (loc: string) => `Vinpearl Resort & Spa ${loc}`,
+  (loc: string) => `Novotel ${loc}`,
+  (loc: string) => `Sala ${loc} Beach Hotel`,
+  () => "Ocean Pearl Hotel",
+  () => "Palm Bay Villas",
+];
+
 export function mockChatResponse(
   prompt: string,
   brand: string,
   competitors: string[],
-  seedIndex: number
+  seedIndex: number,
+  location = ""
 ): string {
   const rng = mulberry32(hashCode(prompt) + seedIndex * 2654435761);
-  const pool = [brand, ...competitors];
+  const market = !brand;
+  const pool = market ? MOCK_MARKET_NAMES.map((make) => make(location || "City")) : [brand, ...competitors];
   const mentioned: string[] = [];
 
-  for (const name of pool) {
-    const chance = name === brand ? 0.6 : 0.35;
+  pool.forEach((name, i) => {
+    // Market mode: earlier names are more popular, and the lead shifts with the location.
+    const chance = market ? 0.75 - ((i + hashCode(location)) % pool.length) * 0.1 : name === brand ? 0.6 : 0.35;
     if (rng() < chance) mentioned.push(name);
-  }
+  });
   if (mentioned.length === 0 && pool.length > 0) {
     mentioned.push(pool[Math.floor(rng() * pool.length)]);
   }

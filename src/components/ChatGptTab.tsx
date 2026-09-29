@@ -8,11 +8,16 @@ import { MentionRateChart, type MentionRateRow } from "@/components/MentionRateC
 import { ResponseExplorer } from "@/components/ResponseExplorer";
 import { BusinessLeaderboard } from "@/components/BusinessLeaderboard";
 import { SerpComparisonView } from "@/components/SerpComparisonView";
+import { RegionLeaders } from "@/components/RegionLeaders";
+import { RegionMatrix } from "@/components/RegionMatrix";
+import { Segmented } from "@/components/tracking/ui";
 import type {
+  AnalysisMode,
   AnalysisSummary,
   AnalyzeRequestBody,
   Leaderboard,
   PromptResult,
+  RegionReport,
   SerpComparison,
   StreamEvent,
 } from "@/lib/types";
@@ -27,11 +32,14 @@ interface RunState {
   summary: AnalysisSummary | null;
   leaderboard: Leaderboard | null;
   yourBrandRank: number | null;
-  serpComparison: SerpComparison | null;
+  regions: RegionReport[];
+  serpComparisons: SerpComparison[];
   error: string | null;
+  mode: AnalysisMode;
   brand: string;
+  brandTerms: string[];
   competitors: string[];
-  expectsSerp: boolean;
+  locations: string[];
 }
 
 const initialState: RunState = {
@@ -43,15 +51,19 @@ const initialState: RunState = {
   summary: null,
   leaderboard: null,
   yourBrandRank: null,
-  serpComparison: null,
+  regions: [],
+  serpComparisons: [],
   error: null,
+  mode: "market",
   brand: "",
+  brandTerms: [],
   competitors: [],
-  expectsSerp: false,
+  locations: [],
 };
 
 export function ChatGptTab() {
   const [state, setState] = useState<RunState>(initialState);
+  const [serpLocation, setSerpLocation] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
   const handleStop = useCallback(() => {
@@ -62,14 +74,18 @@ export function ChatGptTab() {
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const brand = body.brand?.trim() ?? "";
     setState({
       ...initialState,
       running: true,
       statusMessage: "Starting...",
-      brand: body.brand,
+      mode: body.mode ?? "market",
+      brand,
+      brandTerms: brand ? [brand, ...splitList(body.brandAliases)] : [],
       competitors: splitList(body.competitors),
-      expectsSerp: Boolean(body.location?.trim()),
+      locations: body.locations ?? [],
     });
+    setSerpLocation("");
 
     try {
       const res = await fetch("/api/analyze", {
@@ -134,16 +150,16 @@ export function ChatGptTab() {
               total: event.total,
             };
           case "summary":
-            return { ...s, summary: event.summary, statusMessage: "Done." };
+            return { ...s, summary: event.summary };
           case "leaderboard":
+            return { ...s, leaderboard: event.leaderboard, yourBrandRank: event.yourBrandRank, regions: event.regions };
+          case "serp":
             return {
               ...s,
-              leaderboard: event.leaderboard,
-              yourBrandRank: event.yourBrandRank,
-              statusMessage: s.expectsSerp ? s.statusMessage : "Done.",
+              serpComparisons: [...s.serpComparisons, event.comparison].sort(
+                (a, b) => s.locations.indexOf(a.location) - s.locations.indexOf(b.location)
+              ),
             };
-          case "serp":
-            return { ...s, serpComparison: event.comparison, statusMessage: "Done." };
           case "error":
             return { ...s, error: event.message };
           default:
@@ -153,34 +169,41 @@ export function ChatGptTab() {
     }
   }, []);
 
-  const mentionRows: MentionRateRow[] = state.summary
-    ? [
-        {
-          name: state.summary.brand,
-          mentionRate: state.summary.brandMentionRate,
-          mentionCount: state.summary.brandMentionCount,
-          totalOccurrences: state.summary.brandTotalOccurrences,
-          isBrand: true,
-        },
-        ...state.summary.competitors.map((c) => ({
-          name: c.name,
-          mentionRate: c.mentionRate,
-          mentionCount: c.mentionCount,
-          totalOccurrences: c.totalOccurrences,
-          isBrand: false,
-        })),
-      ]
-    : [];
+  const summary = state.summary;
+  const brandMode = state.mode === "brand";
+  const mentionRows: MentionRateRow[] =
+    summary && brandMode
+      ? [
+          {
+            name: summary.brand,
+            mentionRate: summary.brandMentionRate,
+            mentionCount: summary.brandMentionCount,
+            totalOccurrences: summary.brandTotalOccurrences,
+            isBrand: true,
+          },
+          ...summary.competitors.map((c) => ({
+            name: c.name,
+            mentionRate: c.mentionRate,
+            mentionCount: c.mentionCount,
+            totalOccurrences: c.totalOccurrences,
+            isBrand: false,
+          })),
+        ]
+      : [];
+  const multiRegion = state.regions.length > 1;
+  const activeSerp =
+    state.serpComparisons.find((c) => c.location === serpLocation) ?? state.serpComparisons[0] ?? null;
 
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">
         <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
-          ChatGPT Brand Mentions
+          ChatGPT Mentions
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Enter a prompt your customers might ask ChatGPT. We&apos;ll generate similar prompts, run them all through
-          the ChatGPT API, and measure how often your brand actually gets recommended.
+          Enter a question your customers might ask ChatGPT and the locations you care about. We generate realistic
+          variations for each location, run them all through the ChatGPT API, and rank which businesses it recommends
+          most - or how often your own brand makes the list.
         </p>
       </header>
 
@@ -206,41 +229,90 @@ export function ChatGptTab() {
         </div>
       ) : null}
 
-      {state.summary ? (
-        <>
+      {summary ? (
+        brandMode ? (
+          <>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <StatTile
+                label="Brand mention rate"
+                value={`${Math.round(summary.brandMentionRate * 100)}%`}
+                sublabel={`${summary.brandMentionCount} of ${summary.completed} prompts`}
+              />
+              <StatTile
+                label="Prompts run"
+                value={String(summary.totalPrompts)}
+                sublabel={
+                  summary.locations.length > 1 ? `${summary.locations.length} locations · ${summary.model}` : summary.model
+                }
+              />
+              <StatTile label="Total mentions" value={String(summary.brandTotalOccurrences)} sublabel="across all responses" />
+              <StatTile
+                label="Failed calls"
+                value={String(summary.failed)}
+                sublabel={summary.mock ? "mock mode" : "API errors"}
+              />
+            </div>
+            {mentionRows.length > 1 ? <MentionRateChart rows={mentionRows} completed={summary.completed} /> : null}
+          </>
+        ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatTile
-              label="Brand mention rate"
-              value={`${Math.round(state.summary.brandMentionRate * 100)}%`}
-              sublabel={`${state.summary.brandMentionCount} of ${state.summary.completed} prompts`}
+              label="Locations"
+              value={String(Math.max(1, summary.locations.length))}
+              sublabel={summary.locations.length ? summary.locations.join(", ") : "not split by location"}
             />
-            <StatTile label="Prompts run" value={String(state.summary.totalPrompts)} sublabel={state.summary.model} />
-            <StatTile label="Total mentions" value={String(state.summary.brandTotalOccurrences)} sublabel="across all responses" />
+            <StatTile label="Prompts run" value={String(summary.totalPrompts)} sublabel={summary.model} />
+            <StatTile
+              label="Businesses found"
+              value={state.leaderboard ? String(state.leaderboard.entries.length) : "…"}
+              sublabel={state.leaderboard ? `${state.leaderboard.brands.length} brands` : "extracting"}
+            />
             <StatTile
               label="Failed calls"
-              value={String(state.summary.failed)}
-              sublabel={state.summary.mock ? "mock mode" : "API errors"}
+              value={String(summary.failed)}
+              sublabel={summary.mock ? "mock mode" : "API errors"}
             />
           </div>
+        )
+      ) : null}
 
-          {mentionRows.length > 1 ? (
-            <MentionRateChart rows={mentionRows} completed={state.summary.completed} />
-          ) : null}
-        </>
+      {state.regions.length > 0 ? (
+        <RegionLeaders regions={state.regions} brandTerms={state.brandTerms} brandMode={brandMode} />
+      ) : null}
+
+      {multiRegion && state.leaderboard && state.leaderboard.entries.length > 0 ? (
+        <RegionMatrix regions={state.regions} overall={state.leaderboard} brandTerms={state.brandTerms} />
       ) : null}
 
       {state.leaderboard ? (
         <BusinessLeaderboard
           leaderboard={state.leaderboard}
-          yourBrandRank={state.yourBrandRank}
-          brand={state.brand}
+          brandTerms={state.brandTerms}
+          scope={multiRegion ? `all ${state.regions.length} locations` : state.regions[0]?.location}
         />
       ) : null}
 
-      {state.serpComparison ? <SerpComparisonView comparison={state.serpComparison} /> : null}
+      {activeSerp ? (
+        <div className="flex flex-col gap-2">
+          {state.serpComparisons.length > 1 ? (
+            <Segmented
+              value={activeSerp.location}
+              options={state.serpComparisons.map((c) => ({ value: c.location, label: c.location }))}
+              onChange={setSerpLocation}
+              ariaLabel="Local comparison location"
+            />
+          ) : null}
+          <SerpComparisonView comparison={activeSerp} />
+        </div>
+      ) : null}
 
       {state.results.length > 0 ? (
-        <ResponseExplorer results={state.results} brand={state.brand} competitors={state.competitors} />
+        <ResponseExplorer
+          results={state.results}
+          brand={brandMode ? state.brand : ""}
+          competitors={state.competitors}
+          locations={state.locations}
+        />
       ) : null}
     </div>
   );

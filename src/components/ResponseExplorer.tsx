@@ -6,8 +6,10 @@ import { MentionBadge } from "./MentionBadge";
 
 interface ResponseExplorerProps {
   results: PromptResult[];
+  /** Empty in market mode, which hides the mentioned / not-mentioned filters. */
   brand: string;
   competitors: string[];
+  locations: string[];
 }
 
 type Filter = "all" | "mentioned" | "not-mentioned" | "errors";
@@ -42,36 +44,46 @@ function highlight(text: string, brand: string, competitors: string[]) {
   });
 }
 
-export function ResponseExplorer({ results, brand, competitors }: ResponseExplorerProps) {
+export function ResponseExplorer({ results, brand, competitors, locations }: ResponseExplorerProps) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [location, setLocation] = useState<string>("");
+
+  const inLocation = useMemo(
+    () => (location ? results.filter((r) => r.location === location) : results),
+    [results, location]
+  );
 
   const filtered = useMemo(() => {
     switch (filter) {
       case "mentioned":
-        return results.filter((r) => r.brandMentioned);
+        return inLocation.filter((r) => r.brandMentioned);
       case "not-mentioned":
-        return results.filter((r) => !r.brandMentioned && !r.error);
+        return inLocation.filter((r) => !r.brandMentioned && !r.error);
       case "errors":
-        return results.filter((r) => r.error);
+        return inLocation.filter((r) => r.error);
       default:
-        return results;
+        return inLocation;
     }
-  }, [results, filter]);
+  }, [inLocation, filter]);
 
   const counts = useMemo(
     () => ({
-      all: results.length,
-      mentioned: results.filter((r) => r.brandMentioned).length,
-      notMentioned: results.filter((r) => !r.brandMentioned && !r.error).length,
-      errors: results.filter((r) => r.error).length,
+      all: inLocation.length,
+      mentioned: inLocation.filter((r) => r.brandMentioned).length,
+      notMentioned: inLocation.filter((r) => !r.brandMentioned && !r.error).length,
+      errors: inLocation.filter((r) => r.error).length,
     }),
-    [results]
+    [inLocation]
   );
 
   const filterButtons: Array<{ key: Filter; label: string; count: number }> = [
     { key: "all", label: "All", count: counts.all },
-    { key: "mentioned", label: "Mentioned", count: counts.mentioned },
-    { key: "not-mentioned", label: "Not mentioned", count: counts.notMentioned },
+    ...(brand
+      ? [
+          { key: "mentioned" as Filter, label: "Mentioned", count: counts.mentioned },
+          { key: "not-mentioned" as Filter, label: "Not mentioned", count: counts.notMentioned },
+        ]
+      : []),
     ...(counts.errors > 0 ? [{ key: "errors" as Filter, label: "Errors", count: counts.errors }] : []),
   ];
 
@@ -84,7 +96,23 @@ export function ResponseExplorer({ results, brand, competitors }: ResponseExplor
         <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
           Prompts &amp; responses
         </h3>
-        <div className="flex flex-wrap gap-1 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {locations.length > 1 ? (
+            <select
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              aria-label="Filter by location"
+              className="rounded border px-2 py-1 text-xs"
+              style={{ background: "var(--surface-1)", color: "var(--text-primary)", borderColor: "var(--border-hairline)" }}
+            >
+              <option value="">All locations</option>
+              {locations.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
+          ) : null}
           {filterButtons.map((b) => (
             <button
               key={b.key}
@@ -112,17 +140,25 @@ export function ResponseExplorer({ results, brand, competitors }: ResponseExplor
             <details key={r.index} className="group py-2.5" style={{ borderColor: "var(--gridline)" }}>
               <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
                 <span className="flex-1 text-sm" style={{ color: "var(--text-primary)" }}>
+                  {locations.length > 1 && r.location ? (
+                    <span
+                      className="mr-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+                      style={{ background: "var(--gridline)", color: "var(--text-secondary)" }}
+                    >
+                      {r.location}
+                    </span>
+                  ) : null}
                   {r.prompt}
                 </span>
                 {r.error ? (
                   <span className="text-xs font-medium whitespace-nowrap" style={{ color: "var(--status-critical)" }}>
                     Error
                   </span>
-                ) : (
+                ) : brand ? (
                   <span className="whitespace-nowrap">
                     <MentionBadge mentioned={r.brandMentioned} />
                   </span>
-                )}
+                ) : null}
               </summary>
               <div
                 className="mt-2 rounded p-3 text-sm whitespace-pre-wrap"

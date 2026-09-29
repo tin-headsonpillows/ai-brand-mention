@@ -11,7 +11,7 @@ export default function Home() {
 
   return (
     <div
-      className={`mx-auto flex w-full flex-1 flex-col gap-6 px-4 py-10 sm:px-6 ${tab === "tracking" ? "max-w-[1440px]" : "max-w-4xl"}`}
+      className={`mx-auto flex w-full flex-1 flex-col gap-6 px-4 py-10 sm:px-6 ${tab === "tracking" ? "max-w-[1440px]" : "max-w-6xl"}`}
     >
       <header className="flex flex-col gap-3">
         <h1 className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>

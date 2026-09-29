@@ -1,18 +1,27 @@
 # AI Brand Mention Tracker
 
-Enter one example prompt (e.g. "best hotel for family in Da Nang"), and this
-tool will:
+Enter one example prompt (e.g. "top beachfront hotel") and the locations you
+care about (e.g. Da Nang, Nha Trang, Phu Quoc), and the ChatGPT Mentions tab
+will:
 
-1. Ask ChatGPT to generate a batch of realistic, differently-worded variations
-   of that prompt (up to 100).
+1. Rewrite the prompt for each location and ask ChatGPT to generate
+   realistic, differently-worded variations that stay in that place (the
+   prompt count - up to 100 - is split evenly across the locations).
 2. Send each variation to the ChatGPT API and collect the answers.
-3. Count how often your brand (and, optionally, named competitors) actually
-   gets mentioned in those answers.
-4. Show the results on a live dashboard: mention rate, total mentions, a
-   brand-vs-competitor comparison chart, every individual prompt/response
-   pair with the mentions highlighted, a leaderboard of every business
-   ChatGPT mentioned (with your rank among them), and - if you set a location
-   - a comparison against Google's local pack via SerpApi.
+3. Extract every business the answers recommend, with its place in each
+   answer's list, and roll properties up to their parent brand / chain.
+4. Show the results on a live dashboard, in one of two modes:
+   - **Regional market** - the most recommended businesses in each location,
+     a "who wins where" matrix across locations, and an overall leaderboard
+     (share of answers, times listed first, average position).
+   - **Brand awareness** - the same breakdown plus how often your brand (and
+     optionally named competitors) gets mentioned, overall and per location.
+   Optionally, each location is compared against Google's local pack via
+   SerpApi.
+
+Put `{location}` in the prompt to control where the place goes; otherwise
+" in <location>" is appended, and a prompt that already names one of the
+locations has it swapped for each of the others.
 
 ## Getting started
 
@@ -52,7 +61,7 @@ deployer's:
 |---|---|---|---|
 | `OPENAI_API_KEY` | For real runs | - | Your OpenAI API key. Without it, the app uses mock mode. |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | Chat model used both to generate prompt variations and to answer them. Can be overridden per-run in the UI's "Advanced options". |
-| `SERPAPI_API_KEY` | For real local comparisons | - | Enables the "ChatGPT vs. Google local results" section when a Location is set. Without it, that section still renders using simulated local results. |
+| `SERPAPI_API_KEY` | For real local comparisons | - | Enables the "ChatGPT vs. Google local results" section when locations are set and the comparison is switched on. Without it, that section still renders using simulated local results. |
 
 ## How it works
 
@@ -69,11 +78,14 @@ deployer's:
   stream live, so you see prompts complete and stats update as the run
   progresses. Use "Stop" to cancel a run early.
 - `src/lib/leaderboard.ts` re-reads all responses (batched, then
-  consolidated) to extract every business mentioned - not just your named
-  brand/competitors - and ranks them so you can see where you land among
-  the full field.
+  consolidated once for the whole run so names match across locations) to
+  extract every business mentioned - not just your named brand/competitors -
+  in the order each answer lists them, then ranks them overall and per
+  location, by business and by parent brand.
+- `src/lib/locations.ts` rewrites the prompt for each location and splits
+  the prompt budget across them.
 - `src/lib/serpapi.ts` + `src/lib/compare.ts` fetch Google Local & Google
-  Maps results for the location you set and categorize each business as
+  Maps results for each location and categorize each business as
   mentioned by both ChatGPT and the local pack, ChatGPT only, or the local
   pack only - the same "gap signal" framing used in manual GEO visibility
   audits.

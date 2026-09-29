@@ -1,11 +1,13 @@
-import type { AnalysisSummary, PromptResult } from "./types";
+import type { AnalysisMode, AnalysisSummary, PromptResult } from "./types";
 
 export function buildSummary(
   brand: string,
   competitors: string[],
   results: PromptResult[],
   model: string,
-  mock: boolean
+  mock: boolean,
+  mode: AnalysisMode,
+  locations: string[]
 ): AnalysisSummary {
   const total = results.length;
   const failed = results.filter((r) => r.error).length;
@@ -36,5 +38,7 @@ export function buildSummary(
     competitors: competitorSummaries,
     model,
     mock,
+    mode,
+    locations,
   };
 }
