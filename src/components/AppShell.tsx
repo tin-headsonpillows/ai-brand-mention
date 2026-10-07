@@ -8,6 +8,7 @@ export const TABS = [
   { href: "/google-search-tracking", label: "Google Search Tracking", wide: true },
   { href: "/chatgpt-mentions", label: "ChatGPT Mentions", wide: false },
   { href: "/google-maps-reviews", label: "Google Maps Reviews", wide: true },
+  { href: "/images", label: "Images", wide: true },
 ] as const;
 
 /** Header + tab bar shared by every section; each tab is its own URL so it can be bookmarked. */

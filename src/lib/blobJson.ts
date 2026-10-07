@@ -55,3 +55,38 @@ export async function deleteJson(pathnames: string[]): Promise<void> {
   }
   await del(pathnames);
 }
+
+/** Binary files (images) in the same private store; LOCAL_BLOB_DIR applies here too. */
+export async function writeBinary(pathname: string, data: Uint8Array, contentType: string): Promise<void> {
+  if (localDir) {
+    const target = localPath(pathname);
+    await mkdir(path.dirname(target), { recursive: true });
+    const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temp, data);
+    await rename(temp, target);
+    return;
+  }
+  await put(pathname, Buffer.from(data), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType,
+  });
+}
+
+export async function readBinary(pathname: string): Promise<Uint8Array | null> {
+  if (localDir) {
+    try {
+      return new Uint8Array(await readFile(localPath(pathname)));
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const result = await get(pathname, { access: "private", useCache: false });
+    if (!result || result.statusCode !== 200) return null;
+    return new Uint8Array(await new Response(result.stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
