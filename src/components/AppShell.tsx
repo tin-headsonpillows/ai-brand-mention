@@ -9,6 +9,7 @@ export const TABS = [
   { href: "/chatgpt-mentions", label: "ChatGPT Mentions", wide: false },
   { href: "/google-maps-reviews", label: "Google Maps Reviews", wide: true },
   { href: "/images", label: "Images", wide: true },
+  { href: "/articles", label: "Articles", wide: true },
 ] as const;
 
 /** Header + tab bar shared by every section; each tab is its own URL so it can be bookmarked. */
@@ -22,7 +23,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <h1 className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>
           AI Brand Mention Tracker
         </h1>
-        <nav className="flex gap-1 border-b" style={{ borderColor: "var(--gridline)" }} aria-label="Sections">
+        <nav className="flex gap-1 overflow-x-auto border-b" style={{ borderColor: "var(--gridline)" }} aria-label="Sections">
           {TABS.map((t) => {
             const current = t.href === active.href;
             return (
@@ -30,7 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={t.href}
                 href={t.href}
                 aria-current={current ? "page" : undefined}
-                className="border-b-2 px-3 py-2 text-sm font-medium"
+                className="border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap"
                 style={{
                   borderColor: current ? "var(--series-1)" : "transparent",
                   color: current ? "var(--text-primary)" : "var(--text-muted)",

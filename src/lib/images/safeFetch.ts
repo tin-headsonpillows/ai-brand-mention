@@ -25,14 +25,18 @@ function isPrivateAddress(address: string): boolean {
   );
 }
 
-async function assertPublicUrl(raw: string): Promise<URL> {
+/** Local testing against a WordPress on this machine only; never honoured in production builds. */
+const allowPrivate = () => process.env.NODE_ENV !== "production" && process.env.ALLOW_PRIVATE_FETCH === "1";
+
+export async function assertPublicUrl(raw: string): Promise<URL> {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    throw new Error("Not a valid image link");
+    throw new Error("Not a valid link");
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Only http(s) image links are supported");
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Only http(s) links are supported");
+  if (allowPrivate()) return url;
   const addresses = isIP(url.hostname) ? [{ address: url.hostname }] : await lookup(url.hostname, { all: true });
   if (addresses.length === 0 || addresses.some((a) => isPrivateAddress(a.address))) {
     throw new Error("That address isn't reachable from here");
@@ -67,6 +71,33 @@ export async function fetchPublicImage(raw: string): Promise<{ data: Uint8Array;
     const data = new Uint8Array(await res.arrayBuffer());
     if (data.byteLength > MAX_BYTES) throw new Error("Image is larger than 20 MB");
     return { data, contentType };
+  }
+  throw new Error("Too many redirects");
+}
+
+/**
+ * fetch() for a user-supplied site (e.g. a WordPress install): refuses private/internal addresses, checks every
+ * redirect hop, and only follows redirects for GET/HEAD (a POST that redirects is reported instead of replayed).
+ */
+export async function publicFetch(raw: string, init: RequestInit = {}, timeoutMs = 30_000): Promise<Response> {
+  let url = await assertPublicUrl(raw);
+  const method = (init.method ?? "GET").toUpperCase();
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
+    } catch (err) {
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      throw new Error(timedOut ? `${url.host} didn't answer in time` : `Couldn't reach ${url.origin} - check the address (and whether the site uses https)`);
+    }
+    if (res.status < 300 || res.status >= 400) return res;
+    const next = res.headers.get("location");
+    if (!next) return res;
+    const target = new URL(next, url);
+    if (method !== "GET" && method !== "HEAD") {
+      throw new Error(`The site redirected to ${target.origin}${target.pathname} - use that address in the WordPress settings`);
+    }
+    url = await assertPublicUrl(target.toString());
   }
   throw new Error("Too many redirects");
 }

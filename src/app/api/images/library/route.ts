@@ -6,7 +6,7 @@ import { isMockMode } from "@/lib/openai";
 import { resolveProject } from "@/lib/tracking/store";
 import type { ImageKind } from "@/lib/images/types";
 
-const KINDS: ImageKind[] = ["google", "instagram", "generated", "upload"];
+const KINDS: ImageKind[] = ["google", "instagram", "generated", "upload", "doc", "web"];
 const MAX_BYTES = 4 * 1024 * 1024;
 
 export async function GET(req: NextRequest) {
@@ -19,13 +19,15 @@ export async function GET(req: NextRequest) {
   });
 }
 
-/** Saves an exported JPG. Body: the image bytes; details in the query string. */
+/** Saves an exported JPG or an uploaded image. Body: the image bytes; details in the query string. */
 export async function POST(req: NextRequest) {
   const p = req.nextUrl.searchParams;
   const projectId = await resolveProject(p.get("project"));
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
   const contentType = (req.headers.get("content-type") ?? "").split(";")[0];
-  if (contentType !== "image/jpeg") return Response.json({ error: "Only JPG images can be saved" }, { status: 400 });
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(contentType)) {
+    return Response.json({ error: "Only JPG, PNG, WebP or GIF images can be saved" }, { status: 400 });
+  }
   const data = new Uint8Array(await req.arrayBuffer());
   if (data.byteLength === 0 || data.byteLength > MAX_BYTES) {
     return Response.json({ error: "Image must be under 4 MB" }, { status: 413 });

@@ -14,6 +14,8 @@ const KIND_LABEL: Record<LibraryItem["kind"], string> = {
   instagram: "Instagram",
   generated: "AI generated",
   upload: "Upload",
+  doc: "Google Doc",
+  web: "Web link",
 };
 
 /** The project's saved images: re-download, re-crop (select), or delete. */

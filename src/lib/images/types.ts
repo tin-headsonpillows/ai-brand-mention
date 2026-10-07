@@ -1,4 +1,4 @@
-export type ImageKind = "google" | "instagram" | "generated" | "upload";
+export type ImageKind = "google" | "instagram" | "generated" | "upload" | "doc" | "web";
 
 /** One image found by a search (Google Images or an Instagram profile). */
 export interface ImageHit {

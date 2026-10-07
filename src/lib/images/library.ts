@@ -1,5 +1,6 @@
 import { deleteJson, readBinary, readJson, writeBinary, writeJson } from "../blobJson";
 import type { LibraryItem } from "./types";
+export { libraryFileUrl, parseLibraryFileUrl } from "./libraryUrl";
 
 /** Per-project image library: one index plus one file per image, in the private Blob store. */
 const indexPath = (projectId: string) => `images/${projectId}/index.json`;
@@ -10,6 +11,7 @@ interface LibraryIndex {
 }
 
 const validId = (id: string) => /^[\w-]{1,80}$/.test(id);
+
 
 export async function listLibrary(projectId: string): Promise<LibraryItem[]> {
   return (await readJson<LibraryIndex>(indexPath(projectId)))?.items ?? [];

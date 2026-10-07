@@ -153,6 +153,4 @@ export async function saveJpegToLibrary(
   return res.ok;
 }
 
-export function libraryFileUrl(projectId: string, id: string): string {
-  return `/api/images/library/file?project=${encodeURIComponent(projectId)}&id=${encodeURIComponent(id)}`;
-}
+export { libraryFileUrl } from "@/lib/images/libraryUrl";

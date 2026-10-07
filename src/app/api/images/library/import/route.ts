@@ -14,7 +14,7 @@ const RASTER = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 interface ImportRequest {
   url: string;
-  kind: "google" | "instagram";
+  kind: "google" | "instagram" | "web";
   title: string;
   pageUrl?: string;
 }
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       if (!url) return null;
       return {
         url,
-        kind: r.kind === "instagram" ? "instagram" : "google",
+        kind: r.kind === "instagram" ? "instagram" : r.kind === "web" ? "web" : "google",
         title: typeof r.title === "string" ? r.title.slice(0, 200) : "",
         pageUrl: httpUrl(r.pageUrl),
       };
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
         entries.push({
           meta: {
             kind: r.kind,
-            title: r.title || (r.kind === "instagram" ? "Instagram post" : "Google image"),
+            title: r.title || (r.kind === "instagram" ? "Instagram post" : r.kind === "web" ? "Web image" : "Google image"),
             width: size?.width ?? 0,
             height: size?.height ?? 0,
             contentType,

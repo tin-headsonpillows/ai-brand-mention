@@ -89,6 +89,35 @@ Find, crop and download images as JPG:
   and downloaded JPGs are kept per project in Vercel Blob, so they can be
   re-downloaded or re-cropped later.
 
+## Articles tab
+
+Manage SEO articles from a Google Sheets content plan and publish them to the project's WordPress site:
+
+- **Import** a content-plan Sheet (one row per article: title, focus keyword, a
+  link to its Google Doc, categories, tags, publish date...; columns are
+  matched by header and can be remapped) or a single Google Doc. Doc headings
+  become H2/H3 (the post title is the H1); images in the Doc are copied to the
+  project's image library. Re-importing updates an article in place.
+- **Google sign-in** (OAuth, read-only Sheets + Docs scopes) reads private
+  files the viewer can open. Tokens stay in an encrypted, httpOnly cookie in
+  that browser. Without sign-in, files shared as "Anyone with the link" still
+  work via Google's public export.
+- **Editor**: rich text (headings, lists, links, tables, images with alt text)
+  or raw HTML; images come from the project library, any image link, or an
+  upload.
+- **On-page SEO panel**: live score and checklist (keyword in title / meta /
+  slug / intro / subheadings, density, title and meta lengths, content length,
+  headings, featured image, alt text, internal and outbound links), a Google
+  result preview, and **ChatGPT suggestions** (`OPENAI_MODEL`) for SEO titles,
+  meta descriptions, slug, keywords, excerpt, missing subtopics, image alt text,
+  categories/tags and concrete edits - each applied with one click.
+- **Publish to WordPress** (REST API + Application Password, stored encrypted
+  per project): as a draft, live, or scheduled. Uploads the images (once per
+  site), sets featured image, categories and tags (created if missing), and
+  the Yoast SEO / Rank Math title, description and focus keyword via a small
+  helper plugin (`/api/wordpress/plugin` downloads it). Publishing again updates
+  the same post.
+
 ## Getting started
 
 ```bash
@@ -131,6 +160,8 @@ deployer's:
 | `OPENAI_IMAGE_MODEL` | No | `gpt-image-2.5-flare` | Default model in the Images tab's generator until a viewer picks another (must be one listed in `src/lib/images/models.ts`; your OpenAI organisation may need to be verified to use GPT Image models). |
 | `BLOB_READ_WRITE_TOKEN` | For tracking & reviews | - | Vercel Blob store that holds tracking history and fetched reviews. |
 | `LOCAL_BLOB_DIR` | No | - | Local development only: store those JSON documents in this folder instead of Vercel Blob. |
+| `APP_SECRET` | For the Articles tab | - | Long random string that encrypts Google sign-in cookies and stored WordPress application passwords. Changing it signs everyone out and requires re-entering WordPress passwords. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google sign-in | - | OAuth "Web application" client with the Sheets and Docs APIs enabled. Redirect URI: `https://<your-domain>/api/google/callback`. Without them, only link-shared Sheets/Docs can be imported. |
 
 ## How it works
 
