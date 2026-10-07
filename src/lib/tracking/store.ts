@@ -1,4 +1,4 @@
-import { del, get, put } from "@vercel/blob";
+import { deleteJson, readJson, writeJson } from "../blobJson";
 import { RESULT_DEPTHS, type KeywordHistory, type TrackingConfig } from "./types";
 
 /**
@@ -19,26 +19,6 @@ function prefix(projectId: string): string {
 
 const configPath = (projectId: string) => `${prefix(projectId)}/config.json`;
 const historyPath = (projectId: string, keywordId: string) => `${prefix(projectId)}/history/${keywordId}.json`;
-
-async function readJson<T>(pathname: string): Promise<T | null> {
-  try {
-    const result = await get(pathname, { access: "private", useCache: false });
-    if (!result || result.statusCode !== 200) return null;
-    return (await new Response(result.stream).json()) as T;
-  } catch {
-    // Blob store unreachable (e.g. no BLOB_READ_WRITE_TOKEN in this environment) - treat as not-yet-created.
-    return null;
-  }
-}
-
-async function writeJson(pathname: string, data: unknown): Promise<void> {
-  await put(pathname, JSON.stringify(data), {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: "application/json",
-  });
-}
 
 export function defaultConfig(): TrackingConfig {
   return {
@@ -77,7 +57,7 @@ export async function deleteProject(projectId: string): Promise<void> {
   const config = await readConfig(projectId);
   await writeJson(PROJECTS_PATH, { projects: ids.filter((id) => id !== projectId) } satisfies ProjectIndex);
   const paths = [configPath(projectId), ...config.keywords.map((k) => historyPath(projectId, k.id))];
-  await del(paths).catch(() => {
+  await deleteJson(paths).catch(() => {
     // The project is already gone from the index; leftover blobs are unreachable and harmless.
   });
 }

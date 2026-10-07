@@ -23,6 +23,35 @@ Put `{location}` in the prompt to control where the place goes; otherwise
 " in <location>" is appended, and a prompt that already names one of the
 locations has it swapped for each of the others.
 
+## Reviews tab
+
+Add any business from Google Maps (search by name or paste a Maps link), or a
+hotel from Google Hotels (Google reviews plus partner sites such as
+Tripadvisor). The app pulls its reviews newest-first through SerpApi
+(`google_maps_reviews` / `google_hotels_reviews`), up to the history window
+and review cap you pick, and stores them in Vercel Blob so later refreshes
+only fetch what's new.
+
+Each review is analysed for overall sentiment and for the specific points it
+praises or criticises. Points are sorted into a fixed set of aspects chosen
+for that business (e.g. Breakfast, Room Cleanliness, Front Desk Staff), so
+periods stay comparable. The dashboard filters everything by 7 days, 28 days,
+3, 6 or 12 months, or all, with deltas against the previous period. It shows:
+
+- headline numbers: reviews, average rating, % positive / negative, owner
+  reply rate;
+- sentiment over time and the star-rating mix;
+- a praise & criticism heatmap (aspect × period). Green cells count praise
+  and red cells count criticism; darker means more mentions. Click a cell to
+  read those reviews;
+- top praise / top criticism with sample quotes, and the review list.
+
+Large backfills run as a series of time-boxed requests
+(`src/app/api/reviews/sync`) that the page chains automatically, so they
+stay under the function time limit. Without a server OpenAI key the analysis
+falls back to a keyword method. Without SerpApi keys the reviews are
+simulated.
+
 ## Getting started
 
 ```bash
@@ -61,7 +90,9 @@ deployer's:
 |---|---|---|---|
 | `OPENAI_API_KEY` | For real runs | - | Your OpenAI API key. Without it, the app uses mock mode. |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | Chat model used both to generate prompt variations and to answer them. Can be overridden per-run in the UI's "Advanced options". |
-| `SERPAPI_API_KEY` | For real local comparisons | - | Enables the "ChatGPT vs. Google local results" section when locations are set and the comparison is switched on. Without it, that section still renders using simulated local results. |
+| `SERPAPI_API_KEY` (or `SERPAPI_API_KEY_1..8`) | For real SerpApi data | - | Google Search Tracking, the Reviews tab, and the ChatGPT tab's local comparison. Several numbered keys fail over to the next when one runs out of searches. |
+| `BLOB_READ_WRITE_TOKEN` | For tracking & reviews | - | Vercel Blob store that holds tracking history and fetched reviews. |
+| `LOCAL_BLOB_DIR` | No | - | Local development only: store those JSON documents in this folder instead of Vercel Blob. |
 
 ## How it works
 
@@ -99,6 +130,11 @@ Each run makes 1 call to generate variations plus 1 call per prompt (up to
 100 by default). Use the "Number of prompts to run" slider to reduce this
 while testing. Failed calls are retried a couple of times with backoff and
 otherwise reported per-prompt rather than failing the whole run.
+
+The Reviews tab spends 1 SerpApi search per page of reviews (8 on the first
+Google Maps page, then 20), so a 500-review backfill is about 26 searches;
+refreshes stop at the first review already stored. Analysis is one model
+call per 15 reviews.
 
 ## Deploying
 
