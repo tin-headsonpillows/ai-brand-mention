@@ -199,7 +199,7 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
   const rows = aspectRows(current, period.buckets, doc.taxonomy);
   const trend = sentimentByBucket(current, period.buckets);
   const subratings = subratingAverages(current);
-  const analysedShare = doc.reviews.length ? doc.reviews.filter((r) => r.analysis).length / doc.reviews.length : 0;
+  const analysedCount = doc.reviews.filter((r) => r.analysis).length;
 
   const select = (s: HeatmapSelection) => {
     setSelection(s);
@@ -249,9 +249,10 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
         </span>
       </div>
 
-      {analysedShare < 1 ? (
+      {analysedCount < doc.reviews.length ? (
         <p className="text-xs" style={{ color: "var(--status-warning)" }}>
-          {Math.round(analysedShare * 100)}% of stored reviews analysed so far - sentiment figures fill in as the analysis finishes.
+          {analysedCount.toLocaleString()} of {doc.reviews.length.toLocaleString()} saved reviews analysed so far - sentiment
+          figures fill in as the analysis finishes.
         </p>
       ) : null}
 

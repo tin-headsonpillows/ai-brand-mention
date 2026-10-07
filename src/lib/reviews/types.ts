@@ -30,6 +30,8 @@ export interface ReviewPoint {
 export interface ReviewAnalysis {
   sentiment: Sentiment;
   points: ReviewPoint[];
+  /** Set when the model kept skipping this review and the keyword method stood in. */
+  fallback?: boolean;
 }
 
 export interface Review {
@@ -63,10 +65,18 @@ export interface PlaceSettings {
 }
 
 export interface FetchState {
-  /** backfill: first pass walking back in time; refresh: picking up new reviews; done: idle. */
-  phase: "backfill" | "refresh" | "done";
+  /**
+   * backfill: first pass, newest first, walking back in time; extra: further passes in other sort orders,
+   * because Google stops listing "newest" before the end for many places; refresh: picking up new
+   * reviews; done: idle.
+   */
+  phase: "backfill" | "extra" | "refresh" | "done";
   nextPageToken: string | null;
   pagesFetched: number;
+  /** extra phase: which alternative sort order is being walked (index into the source's sort list). */
+  sortIndex?: number;
+  /** extra phase: consecutive pages that brought nothing new. */
+  emptyPages?: number;
   /** Version of the fetch logic that last completed a pass (older passes may have stopped early). */
   version?: number;
 }

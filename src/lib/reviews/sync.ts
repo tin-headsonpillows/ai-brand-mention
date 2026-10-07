@@ -2,7 +2,8 @@ import { DEFAULT_MODEL, isMockMode } from "../openai";
 import { runWithConcurrency } from "../concurrency";
 import { analysisText, analyzeBatch, analyzeHeuristic, buildTaxonomy, heuristicTaxonomy } from "./analyze";
 import { monthsBefore } from "./dates";
-import { fetchReviewsPage } from "./serpapi";
+import { FETCH_VERSION, looksTruncated } from "./coverage";
+import { SORT_ORDERS, fetchReviewsPage } from "./serpapi";
 import { readPlace, writePlace } from "./store";
 import type { PlaceDoc, Review, SyncEvent } from "./types";
 
@@ -14,8 +15,8 @@ const ANALYZE_BATCH = 15;
 const ANALYZE_CONCURRENCY = 5;
 /** A refresh page with this many already-stored reviews means we've caught up. */
 const REFRESH_KNOWN_THRESHOLD = 3;
-export const FETCH_VERSION = 2;
-
+/** An extra sort-order pass gives up after this many pages in a row bring nothing new. */
+const EXTRA_EMPTY_PAGES = 3;
 function pending(doc: PlaceDoc): Review[] {
   return doc.reviews.filter((r) => !r.analysis);
 }
@@ -49,32 +50,46 @@ export async function syncPlace(
     return;
   }
   const before = { fetched: doc.reviews.length, analyzed: doc.reviews.length - pending(doc).length };
-  if (doc.fetch.phase === "done" && (doc.fetch.version ?? 1) < FETCH_VERSION) {
-    // Fetched by the old logic, which could stop early on an out-of-order review: walk the history again.
+  const now = new Date();
+  // monthsBack 0 = the business's whole review history.
+  const cutoff = doc.settings.monthsBack > 0 ? monthsBefore(now, doc.settings.monthsBack).toISOString() : null;
+  const version = doc.fetch.version ?? 1;
+  if (doc.fetch.phase === "done" && version < 2) {
+    // Fetched by the first logic, which could stop early on an out-of-order review: walk the history again.
     // Stored reviews are skipped, so this only re-spends the pages already fetched.
     doc.fetch = { phase: "backfill", nextPageToken: null, pagesFetched: 0, version: FETCH_VERSION };
+  } else if (doc.fetch.phase === "done" && version < FETCH_VERSION) {
+    // The newest-first pass is complete; places where Google cut that list short get the extra passes.
+    doc.fetch = looksTruncated(doc, cutoff)
+      ? { phase: "extra", nextPageToken: null, pagesFetched: 0, sortIndex: 1, emptyPages: 0, version: FETCH_VERSION }
+      : { ...doc.fetch, version: FETCH_VERSION };
   } else if (refresh && doc.fetch.phase === "done") {
     doc.fetch = { phase: "refresh", nextPageToken: null, pagesFetched: 0, version: FETCH_VERSION };
   }
 
   // --- Fetch -----------------------------------------------------------------------------------
-  const now = new Date();
-  // monthsBack 0 = the business's whole review history.
-  const cutoff = doc.settings.monthsBack > 0 ? monthsBefore(now, doc.settings.monthsBack).toISOString() : null;
+  const sorts = SORT_ORDERS[doc.place.source];
   const known = new Set(doc.reviews.map((r) => r.id));
   let addedThisRefresh = 0;
   let pagesSinceSave = 0;
 
-  if (doc.fetch.phase !== "done") {
+  const announce = () => {
+    if (doc.fetch.phase === "done") return;
     emit({
       type: "status",
-      message: doc.fetch.phase === "refresh" ? "Checking for new reviews..." : "Fetching reviews, newest first...",
+      message:
+        doc.fetch.phase === "refresh"
+          ? "Checking for new reviews..."
+          : doc.fetch.phase === "extra"
+            ? `Google stopped listing newest reviews early - collecting the rest sorted by ${sorts[doc.fetch.sortIndex ?? 1]?.label}...`
+            : "Fetching reviews, newest first...",
     });
-  }
+  };
+  announce();
   while (doc.fetch.phase !== "done" && Date.now() - started < FETCH_BUDGET_MS && !isAborted()) {
     let page;
     try {
-      page = await fetchReviewsPage(doc.place, doc.fetch.nextPageToken, now);
+      page = await fetchReviewsPage(doc.place, doc.fetch.nextPageToken, now, doc.fetch.phase === "extra" ? (doc.fetch.sortIndex ?? 1) : 0);
     } catch (err) {
       emit({ type: "error", message: err instanceof Error ? err.message : "Fetching reviews failed" });
       break;
@@ -99,11 +114,11 @@ export async function syncPlace(
         knownOnPage++;
         continue;
       }
-      if (doc.fetch.phase === "backfill" && cutoff && review.date < cutoff) {
+      if ((doc.fetch.phase === "backfill" || doc.fetch.phase === "extra") && cutoff && review.date < cutoff) {
         outsideWindow++;
         continue;
       }
-      if (doc.fetch.phase === "backfill" && doc.reviews.length >= doc.settings.maxReviews) {
+      if ((doc.fetch.phase === "backfill" || doc.fetch.phase === "extra") && doc.reviews.length >= doc.settings.maxReviews) {
         stop = true;
         break;
       }
@@ -121,10 +136,36 @@ export async function syncPlace(
     if (doc.fetch.phase === "refresh" && addedThisRefresh >= doc.settings.maxReviews) stop = true;
     doc.reviews.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
+    // Extra passes aren't date-ordered: they end when the list does, when enough pages in a row add nothing,
+    // or once coverage is reached - never on dates.
+    let nextPass = false;
+    if (doc.fetch.phase === "extra") {
+      doc.fetch.emptyPages = added === 0 ? (doc.fetch.emptyPages ?? 0) + 1 : 0;
+      const capped = doc.reviews.length >= doc.settings.maxReviews;
+      if (capped || !looksTruncated(doc, cutoff)) stop = true;
+      else if (stop || (doc.fetch.emptyPages ?? 0) >= EXTRA_EMPTY_PAGES) {
+        stop = false;
+        nextPass = true;
+      }
+    } else if (doc.fetch.phase === "backfill" && stop && !page.nextPageToken && looksTruncated(doc, cutoff)) {
+      // Google ended the newest-first list short of the total: switch to the other sort orders.
+      stop = false;
+      nextPass = true;
+    }
+
+    if (nextPass) {
+      const nextIndex = doc.fetch.phase === "extra" ? (doc.fetch.sortIndex ?? 1) + 1 : 1;
+      if (nextIndex < sorts.length) {
+        doc.fetch = { phase: "extra", nextPageToken: null, pagesFetched: doc.fetch.pagesFetched, sortIndex: nextIndex, emptyPages: 0, version: FETCH_VERSION };
+        announce();
+      } else {
+        stop = true;
+      }
+    }
     if (stop) {
       doc.fetch = { phase: "done", nextPageToken: null, pagesFetched: doc.fetch.pagesFetched, version: FETCH_VERSION };
       doc.lastSyncedAt = now.toISOString();
-    } else {
+    } else if (!nextPass) {
       doc.fetch.nextPageToken = page.nextPageToken;
     }
     emit(progress(doc));
@@ -190,14 +231,20 @@ export async function syncPlace(
         emit(progress(doc));
         await writePlace(doc);
         if (analyzedThisRound === 0) {
-          emit({
-            type: "error",
-            message:
-              failures > 0
-                ? `The OpenAI analysis failed: ${lastError.slice(0, 200)}. Reviews are saved; press Resume once the OpenAI key works.`
-                : "Some reviews could not be analysed.",
-          });
-          break;
+          if (failures > 0) {
+            emit({
+              type: "error",
+              message: `The OpenAI analysis failed: ${lastError.slice(0, 200)}. Reviews are saved; press "Finish analysis" once the OpenAI key works.`,
+            });
+            break;
+          }
+          // The model answered but keeps leaving these out (typically emoji-only, one-word or very long
+          // reviews): give them the keyword analysis rather than leaving them pending forever.
+          for (const review of todo) {
+            if (!review.analysis) review.analysis = { ...analyzeHeuristic(review), fallback: true };
+          }
+          emit(progress(doc));
+          await writePlace(doc);
         }
       }
     }

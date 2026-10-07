@@ -9,13 +9,13 @@ import { writeParams } from "@/lib/urlState";
 import { EmptyState, SelectControl } from "@/components/tracking/ui";
 import { ProjectBar, type NewProjectInput } from "@/components/tracking/ProjectBar";
 import { AddBusinessDialog, CAP_OPTIONS, HISTORY_OPTIONS } from "./AddBusinessDialog";
+import { FETCH_VERSION, fetchTarget, looksTruncated, windowCutoff } from "@/lib/reviews/coverage";
 import { ReviewsDashboard } from "./ReviewsDashboard";
 
 const STORAGE_KEY = "reviews.place";
 /** Shared with Google Search Tracking, so both tabs open on the same project. */
 const PROJECT_STORAGE_KEY = "tracking.project";
-/** Mirrors FETCH_VERSION in lib/reviews/sync.ts: older completed fetches may have stopped early. */
-const FETCH_VERSION = 2;
+
 /** Each sync request is time-boxed server-side; this bounds how many the client chains for one run. */
 const MAX_SYNC_ROUNDS = 25;
 
@@ -55,22 +55,29 @@ function readKey(key: string): string | null {
   }
 }
 
-/** True while the stored reviews don't yet cover the business's history window (or were fetched by the old, early-stopping logic). */
+/**
+ * True while there's fetching left to do: a pass in progress, or a place completed by older fetch logic that
+ * stopped early (v1) or didn't yet try the other sort orders when Google cut the newest-first list short (v2).
+ */
 function needsFetch(doc: PlaceDoc): boolean {
-  return doc.fetch.phase !== "done" || (doc.fetch.version ?? 1) < FETCH_VERSION;
+  if (doc.fetch.phase !== "done") return true;
+  const version = doc.fetch.version ?? 1;
+  return version < 2 || (version < FETCH_VERSION && looksTruncated(doc, windowCutoff(doc)));
 }
 
 /**
- * Rough SerpApi credits to finish fetching: 1 per page (8 reviews on the first Google Maps page, then 20;
- * smaller pages on Google Hotels). A restarted pass re-reads the pages already stored.
+ * Rough SerpApi credits to finish: 1 per page (20 reviews; 8 on the first Google Maps page). Passes in other
+ * sort orders re-read reviews already saved, so they're estimated at about twice the pages.
  */
 function remainingCredits(doc: PlaceDoc): number {
   if (!needsFetch(doc)) return 0;
   const perPage = doc.place.source === "maps" ? 20 : 10;
-  const target = Math.min(doc.place.reviewCount ?? doc.settings.maxReviews, doc.settings.maxReviews);
-  const remaining = Math.max(0, target - doc.reviews.length);
+  const target = fetchTarget(doc) ?? doc.settings.maxReviews;
+  const missingPages = Math.ceil(Math.max(0, target - doc.reviews.length) / perPage);
+  const version = doc.fetch.version ?? 1;
+  if (doc.fetch.phase === "extra" || (doc.fetch.phase === "done" && version >= 2)) return Math.max(3, missingPages * 2);
   const reread = doc.fetch.nextPageToken ? 0 : Math.ceil(doc.reviews.length / perPage);
-  return Math.max(1, reread + Math.ceil(remaining / perPage) + (doc.fetch.nextPageToken ? 0 : 1));
+  return Math.max(1, reread + missingPages + (doc.fetch.nextPageToken ? 0 : 1));
 }
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -351,6 +358,9 @@ export function ReviewsTab() {
                   {doc.place.rating ? `${doc.place.rating.toFixed(1)} ★ on Google` : ""}
                   {doc.place.reviewCount ? ` · ${doc.place.reviewCount.toLocaleString()} reviews on Google` : ""}
                   {` · ${doc.reviews.length.toLocaleString()} saved`}
+                  {doc.place.reviewCount && doc.settings.monthsBack === 0
+                    ? ` (${Math.min(100, Math.round((doc.reviews.length / doc.place.reviewCount) * 100))}%)`
+                    : ""}
                   {doc.lastSyncedAt ? ` · updated ${fmtDate(doc.lastSyncedAt)}` : ""}
                   {` · ${doc.searchesUsed} SerpApi credits spent so far`}
                 </span>
@@ -403,6 +413,14 @@ export function ReviewsTab() {
                 </button>
               </div>
             </section>
+          ) : null}
+
+          {doc && !fetchPending && doc.fetch.version === FETCH_VERSION && looksTruncated(doc, windowCutoff(doc)) ? (
+            <p className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)" }}>
+              Google lists {doc.reviews.length.toLocaleString()} of the {doc.place.reviewCount?.toLocaleString()} reviews it counts for this
+              place, across every sort order. The rest can&apos;t be retrieved: Google&apos;s count includes reviews it doesn&apos;t
+              list (for example removed or filtered ones).
+            </p>
           ) : null}
 
           {sync.running || sync.error ? (

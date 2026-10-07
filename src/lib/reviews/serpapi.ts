@@ -214,12 +214,38 @@ function hotelReview(r: Json, now: Date): Review | null {
   };
 }
 
-/** One page of reviews, newest first. Each call is one SerpApi search. */
-export async function fetchReviewsPage(place: PlaceRef, pageToken: string | null, now = new Date()): Promise<ReviewsPage> {
-  if (isReviewsMock()) return mockReviewsPage(place, pageToken, now);
+/**
+ * Sort orders per source, newest first. Google often stops listing a place's "newest" reviews well before
+ * its total (SerpApi: "the total number of reviews returned may vary depending on the sorting option"), so
+ * the other orders are walked afterwards to pick up the rest.
+ */
+export const SORT_ORDERS: Record<ReviewSource, Array<{ value: string; label: string }>> = {
+  maps: [
+    { value: "newestFirst", label: "newest" },
+    { value: "ratingLow", label: "lowest rated" },
+    { value: "ratingHigh", label: "highest rated" },
+    { value: "qualityScore", label: "most relevant" },
+  ],
+  hotels: [
+    { value: "2", label: "newest" },
+    { value: "4", label: "lowest rated" },
+    { value: "3", label: "highest rated" },
+    { value: "1", label: "most helpful" },
+  ],
+};
+
+/** One page of reviews in the given sort order (newest first by default). Each call is one SerpApi search. */
+export async function fetchReviewsPage(
+  place: PlaceRef,
+  pageToken: string | null,
+  now = new Date(),
+  sortIndex = 0
+): Promise<ReviewsPage> {
+  if (isReviewsMock()) return mockReviewsPage(place, pageToken, now, sortIndex);
+  const sort = (SORT_ORDERS[place.source][sortIndex] ?? SORT_ORDERS[place.source][0]).value;
 
   if (place.source === "maps") {
-    const params: Record<string, string> = { engine: "google_maps_reviews", sort_by: "newestFirst", hl: "en" };
+    const params: Record<string, string> = { engine: "google_maps_reviews", sort_by: sort, hl: "en" };
     if (place.dataId) params.data_id = place.dataId;
     else if (place.placeId) params.place_id = place.placeId;
     else throw new Error("This place has no Google Maps ID");
@@ -252,7 +278,7 @@ export async function fetchReviewsPage(place: PlaceRef, pageToken: string | null
   const params: Record<string, string> = {
     engine: "google_hotels_reviews",
     property_token: place.propertyToken,
-    sort_by: "2",
+    sort_by: sort,
     hl: "en",
   };
   if (pageToken) params.next_page_token = pageToken;
@@ -314,9 +340,21 @@ const MOCK_CRITICISM = [
 ];
 const MOCK_PAGE_SIZE = 20;
 const MOCK_TOTAL = 360;
+const MOCK_NEWEST_LISTED = 240;
 
-function mockReviewsPage(place: PlaceRef, pageToken: string | null, now: Date): ReviewsPage {
+function mockReviewsPage(place: PlaceRef, pageToken: string | null, now: Date, sortIndex = 0): ReviewsPage {
   const page = pageToken ? Number(pageToken.replace("mock-page-", "")) : 0;
+  if (sortIndex > 0) {
+    // Other sort orders: the full set, in a different order (here: oldest first), like Google's rating sorts.
+    const all: Review[] = [];
+    for (let p = 0; p * MOCK_PAGE_SIZE < MOCK_TOTAL; p++) all.push(...mockReviewsPage(place, p ? `mock-page-${p}` : null, now, -1).reviews);
+    all.reverse();
+    const slice = all.slice(page * MOCK_PAGE_SIZE, (page + 1) * MOCK_PAGE_SIZE);
+    return {
+      reviews: slice,
+      nextPageToken: (page + 1) * MOCK_PAGE_SIZE < all.length ? `mock-page-${page + 1}` : null,
+    };
+  }
   const seed = Number.parseInt(hashId(place.name).slice(1), 36);
   const reviews: Review[] = [];
   for (let i = page * MOCK_PAGE_SIZE; i < Math.min(MOCK_TOTAL, (page + 1) * MOCK_PAGE_SIZE); i++) {
@@ -355,7 +393,9 @@ function mockReviewsPage(place: PlaceRef, pageToken: string | null, now: Date): 
       ...(rng() < 0.45 ? { response: { date: new Date(date.getTime() + 2 * 86_400_000).toISOString(), text: "Thank you for your feedback." } } : {}),
     });
   }
-  const hasMore = (page + 1) * MOCK_PAGE_SIZE < MOCK_TOTAL;
+  // Like Google, the "newest" list ends early (sortIndex -1 = the full set, used by the other mock orders).
+  const listed = sortIndex === -1 ? MOCK_TOTAL : MOCK_NEWEST_LISTED;
+  const hasMore = (page + 1) * MOCK_PAGE_SIZE < listed;
   return {
     reviews,
     nextPageToken: hasMore ? `mock-page-${page + 1}` : null,
