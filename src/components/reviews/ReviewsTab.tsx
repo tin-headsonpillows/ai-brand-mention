@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { PlaceDoc, PlaceSummary, SyncEvent } from "@/lib/reviews/types";
-import type { ProjectSummary } from "@/lib/tracking/types";
+import type { ProjectSummary, SerpUsage } from "@/lib/tracking/types";
+import { SerpUsageBadge } from "@/components/SerpUsageBadge";
+import { writeParams } from "@/lib/urlState";
 import { EmptyState, SelectControl } from "@/components/tracking/ui";
 import { ProjectBar, type NewProjectInput } from "@/components/tracking/ProjectBar";
 import { AddBusinessDialog, CAP_OPTIONS, HISTORY_OPTIONS } from "./AddBusinessDialog";
@@ -73,6 +76,11 @@ function remainingCredits(doc: PlaceDoc): number {
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 export function ReviewsTab() {
+  const searchParams = useSearchParams();
+  // A bookmarked ?project= / ?business= opens that exact view; otherwise the last one used on this device.
+  const urlProject = useRef(searchParams.get("project"));
+  const urlBusiness = useRef(searchParams.get("business"));
+  const [usage, setUsage] = useState<SerpUsage | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceSummary[] | null>(null);
@@ -83,6 +91,11 @@ export function ReviewsTab() {
   const [adding, setAdding] = useState(false);
   const [sync, setSync] = useState<SyncState>(idleSync);
   const abortRef = useRef<AbortController | null>(null);
+
+  const loadUsage = useCallback(async () => {
+    const res = await fetch("/api/tracking/usage", { cache: "no-store" }).catch(() => null);
+    if (res?.ok) setUsage((await res.json()) as SerpUsage);
+  }, []);
 
   const loadPlaces = useCallback(async (project: string) => {
     const res = await fetch(`/api/reviews/places?project=${encodeURIComponent(project)}`, { cache: "no-store" });
@@ -107,10 +120,17 @@ export function ReviewsTab() {
       const list = ((await res.json()) as { projects?: ProjectSummary[] }).projects ?? [];
       setProjects(list);
       const remembered = readKey(PROJECT_STORAGE_KEY);
-      setProjectId(list.find((p) => p.id === remembered)?.id ?? list[0]?.id ?? null);
+      const pick = [urlProject.current, remembered].find((id) => id && list.some((p) => p.id === id));
+      urlProject.current = null;
+      setProjectId(pick ?? list[0]?.id ?? null);
     }
     void init();
-  }, []);
+    void loadUsage();
+  }, [loadUsage]);
+
+  useEffect(() => {
+    writeParams({ project: projectId ?? undefined, business: selectedId ?? undefined });
+  }, [projectId, selectedId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -122,7 +142,9 @@ export function ReviewsTab() {
       const list = await loadPlaces(project);
       if (cancelled) return;
       const stored = readStored();
-      setSelectedId(list.find((p) => p.id === stored)?.id ?? list[0]?.id ?? null);
+      const pick = [urlBusiness.current, stored].find((id) => id && list.some((p) => p.id === id));
+      urlBusiness.current = null;
+      setSelectedId(pick ?? list[0]?.id ?? null);
     }
     void load(projectId);
     return () => {
@@ -211,9 +233,10 @@ export function ReviewsTab() {
       } finally {
         setSync((s) => ({ ...s, running: false, message: null }));
         if (projectId) void loadPlaces(projectId);
+        void loadUsage();
       }
     },
-    [loadDoc, loadPlaces, projectId]
+    [loadDoc, loadPlaces, loadUsage, projectId]
   );
 
   async function removePlace() {
@@ -238,7 +261,7 @@ export function ReviewsTab() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
-            Reviews
+            Google Maps Reviews
           </h2>
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
             Pull a business&apos;s Google reviews, see how sentiment moves over time, and find exactly what customers praise
@@ -276,6 +299,7 @@ export function ReviewsTab() {
           >
             + Add business
           </button>
+          <SerpUsageBadge usage={usage} />
         </div>
       </header>
 

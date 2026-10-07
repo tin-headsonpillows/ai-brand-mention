@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { writeParams } from "@/lib/urlState";
 import type { PlaceDoc, Sentiment } from "@/lib/reviews/types";
 import {
   RANGES,
@@ -177,7 +179,14 @@ function PointsList({
 type SentimentFilter = "all" | Sentiment;
 
 export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
-  const [range, setRange] = useState<RangeKey>("12m");
+  const searchParams = useSearchParams();
+  const [range, setRange] = useState<RangeKey>(() => {
+    const value = searchParams.get("range");
+    return RANGES.some((r) => r.key === value) ? (value as RangeKey) : "12m";
+  });
+  useEffect(() => {
+    writeParams({ range });
+  }, [range]);
   const [selection, setSelection] = useState<HeatmapSelection | null>(null);
   const [sentimentFilter, setSentimentFilter] = useState<SentimentFilter>("all");
   const [search, setSearch] = useState("");

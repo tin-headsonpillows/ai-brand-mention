@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SURFACE_LABEL,
   buildSubjects,
@@ -17,6 +17,9 @@ import {
   type SurfaceFilter,
 } from "@/lib/tracking/analytics";
 import type { KeywordHistory, ProjectSummary, SerpUsage, TrackingConfig } from "@/lib/tracking/types";
+import { SerpUsageBadge } from "@/components/SerpUsageBadge";
+import { useSearchParams } from "next/navigation";
+import { writeParams } from "@/lib/urlState";
 import { isGoogleHost } from "@/lib/tracking/visibility";
 import { Favicon } from "./Favicon";
 import { MentionsView } from "./MentionsView";
@@ -38,6 +41,17 @@ const VIEWS: Array<{ id: View; label: string }> = [
 ];
 
 type Range = "7" | "30" | "90" | "all";
+const RANGE_VALUES = ["7", "30", "90", "all"] as const;
+
+/** Readable slugs for ?view= in bookmarkable URLs. */
+const VIEW_SLUG: Record<View, string> = {
+  overview: "overview",
+  rank: "rank-tracker",
+  mentions: "mentions",
+  responses: "ai-responses",
+  settings: "settings",
+};
+const VIEW_BY_SLUG: Record<string, View> = Object.fromEntries(Object.entries(VIEW_SLUG).map(([v, slug]) => [slug, v as View]));
 
 const RANGE_OPTIONS: Array<{ value: Range; label: string }> = [
   { value: "7", label: "Last 7 days" },
@@ -100,18 +114,28 @@ async function fetchAll(projectId: string, range: Range) {
 }
 
 export function TrackingTab() {
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [config, setConfig] = useState<TrackingConfig | null>(null);
   const [histories, setHistories] = useState<KeywordHistory[]>([]);
   const [usage, setUsage] = useState<SerpUsage | null>(null);
-  const [view, setView] = useState<View>("overview");
-  const [range, setRange] = useState<Range>("30");
+  const [view, setView] = useState<View>(() => VIEW_BY_SLUG[searchParams.get("view") ?? ""] ?? "overview");
+  const [range, setRange] = useState<Range>(() => {
+    const value = searchParams.get("range");
+    return value && (RANGE_VALUES as readonly string[]).includes(value) ? (value as Range) : "30";
+  });
   const [surface, setSurface] = useState<SurfaceFilter>("all");
   const [compare, setCompare] = useState(true);
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The URL (?project, ?view, ?range) seeds the initial view, then follows what's on screen - so it can be bookmarked.
+  const urlProject = useRef(searchParams.get("project"));
+
+  useEffect(() => {
+    writeParams({ project: projectId ?? undefined, view: VIEW_SLUG[view], range });
+  }, [projectId, view, range]);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,8 +144,10 @@ export function TrackingTab() {
         const list = await fetchProjects();
         if (cancelled) return;
         setProjects(list);
+        // A bookmarked ?project= wins over the last project used on this device.
         const remembered = rememberedProject();
-        setProjectId((current) => current ?? (list.some((p) => p.id === remembered) ? remembered : list[0]?.id ?? null));
+        const pick = [urlProject.current, remembered].find((id) => id && list.some((p) => p.id === id)) ?? list[0]?.id ?? null;
+        setProjectId((current) => current ?? pick);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load projects");
       }
@@ -323,23 +349,7 @@ export function TrackingTab() {
           <ProjectBar projects={projects} activeId={projectId} onSelect={selectProject} onCreate={createProject} />
         </div>
         <div className="flex items-center gap-2">
-          <span
-            className="rounded-lg border px-2.5 py-1.5 text-xs"
-            style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)", background: "var(--surface-1)" }}
-            title={
-              usage && !usage.mock
-                ? `${usage.thisMonthUsage ?? "?"} used of ${usage.searchesPerMonth ?? "?"} this month${usage.keyPoolSize > 1 ? ` · key ${(usage.activeKeyIndex ?? 0) + 1} of ${usage.keyPoolSize}` : ""}`
-                : "Mock data - no SerpApi key configured"
-            }
-          >
-            SerpApi{" "}
-            <strong className="tabular" style={{ color: "var(--text-primary)" }}>
-              {searchesLeft != null ? searchesLeft.toLocaleString("en-US") : "–"}
-            </strong>{" "}
-            searches left
-            {usage && usage.keyPoolSize > 1 ? ` · key ${(usage.activeKeyIndex ?? 0) + 1}/${usage.keyPoolSize}` : ""}
-            {usage?.mock ? " · mock" : ""}
-          </span>
+          <SerpUsageBadge usage={usage} />
           <button
             type="button"
             onClick={runNow}

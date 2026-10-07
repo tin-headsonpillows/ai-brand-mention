@@ -23,7 +23,7 @@ Put `{location}` in the prompt to control where the place goes; otherwise
 " in <location>" is appended, and a prompt that already names one of the
 locations has it swapped for each of the others.
 
-## Reviews tab
+## Google Maps Reviews tab
 
 Add any business from Google Maps (search by name or paste a Maps link), or a
 hotel from Google Hotels (Google reviews plus partner sites such as
