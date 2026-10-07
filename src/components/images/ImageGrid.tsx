@@ -12,11 +12,14 @@ export function ImageGrid({
   selected,
   onToggle,
   extra,
+  library,
 }: {
   images: SelectedImage[];
   selected: Set<string>;
   onToggle: (image: SelectedImage) => void;
   extra?: (image: SelectedImage) => React.ReactNode;
+  /** Search results: save to the project library, with the source URLs already saved / being saved. */
+  library?: { saved: Set<string>; saving: Set<string>; onSave: (images: SelectedImage[]) => void };
 }) {
   const [preview, setPreview] = useState<SelectedImage | null>(null);
 
@@ -66,6 +69,7 @@ export function ImageGrid({
                   <span className="truncate">{image.kind === "google" ? image.pageUrl?.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] : ""}</span>
                   {image.width && image.height ? <span className="tabular">{image.width}×{image.height}</span> : null}
                 </span>
+                {library ? <SaveButton image={image} library={library} /> : null}
                 {extra ? extra(image) : null}
               </figcaption>
             </figure>
@@ -98,6 +102,17 @@ export function ImageGrid({
                     Open source page
                   </a>
                 ) : null}
+                {library && !library.saved.has(preview.src) ? (
+                  <button
+                    type="button"
+                    onClick={() => library.onSave([preview])}
+                    disabled={library.saving.has(preview.src)}
+                    className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50"
+                    style={{ borderColor: "var(--border-hairline)", color: "var(--text-primary)" }}
+                  >
+                    {library.saving.has(preview.src) ? "Saving..." : "Save to library"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => onToggle(preview)}
@@ -115,5 +130,23 @@ export function ImageGrid({
         </div>
       ) : null}
     </>
+  );
+}
+
+function SaveButton({ image, library }: { image: SelectedImage; library: NonNullable<Parameters<typeof ImageGrid>[0]["library"]> }) {
+  if (library.saved.has(image.src)) {
+    return <span style={{ color: "var(--text-secondary)" }}>✓ In library</span>;
+  }
+  const saving = library.saving.has(image.src);
+  return (
+    <button
+      type="button"
+      onClick={() => library.onSave([image])}
+      disabled={saving}
+      className="self-start hover:underline disabled:opacity-60"
+      style={{ color: "var(--series-1)" }}
+    >
+      {saving ? "Saving..." : "+ Save to library"}
+    </button>
   );
 }

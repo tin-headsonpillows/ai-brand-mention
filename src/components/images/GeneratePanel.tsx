@@ -2,19 +2,22 @@
 
 import { useState } from "react";
 import { SIZE_PRESETS } from "@/lib/images/crop";
+import { DEFAULT_IMAGE_MODEL, IMAGE_MODELS, drawSize, estimateCost, formatUsd, imageModel } from "@/lib/images/models";
 import type { GenerateQuality, LibraryItem } from "@/lib/images/types";
 import { Segmented } from "@/components/tracking/ui";
 import { ImageGrid } from "./ImageGrid";
 import { downscaleToDataUrl, libraryFileUrl, type SelectedImage } from "./imageClient";
 
 const MAX_REFERENCES = 4;
+const MODEL_STORAGE_KEY = "images.model";
 
-/** Approximate OpenAI image prices per image (square / non-square), for the cost hint only. */
-const PRICE: Record<GenerateQuality, [number, number]> = {
-  low: [0.011, 0.016],
-  medium: [0.042, 0.063],
-  high: [0.167, 0.25],
-};
+function storedModel(): string | null {
+  try {
+    return localStorage.getItem(MODEL_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 interface Reference {
   id: string;
@@ -52,12 +55,15 @@ export function GeneratePanel({
   onToggle,
   onGenerated,
   mockMode,
+  defaultModel,
 }: {
   projectId: string;
   selected: Set<string>;
   onToggle: (image: SelectedImage) => void;
   onGenerated: (images: SelectedImage[]) => void;
   mockMode: boolean;
+  /** The server's default (OPENAI_IMAGE_MODEL), used until the viewer picks one. */
+  defaultModel?: string;
 }) {
   const [prompt, setPrompt] = useState("");
   const [references, setReferences] = useState<Reference[]>([]);
@@ -65,14 +71,28 @@ export function GeneratePanel({
   const [presetId, setPresetId] = useState("square");
   const [width, setWidth] = useState(1080);
   const [height, setHeight] = useState(1080);
+  const [pickedModel, setPickedModel] = useState<string | null>(() => (typeof window === "undefined" ? null : storedModel()));
   const [quality, setQuality] = useState<GenerateQuality>("medium");
+  const [lastCost, setLastCost] = useState<{ model: string; usd: number; images: number } | null>(null);
   const [count, setCount] = useState(2);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<SelectedImage[]>([]);
 
-  const square = Math.abs(width / height - 1) < 0.2;
-  const cost = PRICE[quality][square ? 0 : 1] * count;
+  const model = imageModel(pickedModel) ?? imageModel(defaultModel) ?? imageModel(DEFAULT_IMAGE_MODEL)!;
+  const validSize = width >= 64 && height >= 64;
+  const draw = drawSize(model, validSize ? width : 1024, validSize ? height : 1024);
+  const cost = estimateCost(model, quality, draw.width, draw.height, count, prompt.length);
+  const perImage = model.perImage[quality][draw.square ? 0 : 1];
+
+  function pickModel(id: string) {
+    setPickedModel(id);
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, id);
+    } catch {
+      // only a convenience
+    }
+  }
 
   async function addFiles(files: FileList | null) {
     if (!files) return;
@@ -113,6 +133,7 @@ export function GeneratePanel({
         body: JSON.stringify({
           project: projectId,
           prompt,
+          model: model.id,
           width,
           height,
           quality,
@@ -120,8 +141,9 @@ export function GeneratePanel({
           references: references.map((r) => (r.dataUrl ? { dataUrl: r.dataUrl } : { url: r.url })),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { items?: LibraryItem[]; error?: string };
+      const data = (await res.json().catch(() => ({}))) as { items?: LibraryItem[]; error?: string; costUsd?: number; model?: string };
       if (!res.ok || !data.items) throw new Error(data.error ?? `Generation failed (${res.status})`);
+      setLastCost({ model: data.model ?? model.id, usd: data.costUsd ?? 0, images: data.items.length });
       const made = data.items.map((item) => libraryItemToSelected(projectId, item, { width, height }));
       setResults((r) => [...made, ...r]);
       onGenerated(made);
@@ -203,6 +225,21 @@ export function GeneratePanel({
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+              Model
+            </span>
+            <select value={model.id} onChange={(e) => pickModel(e.target.value)} className="rounded-lg border px-2 py-1.5 text-sm" style={fieldStyle}>
+              {IMAGE_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} - from {formatUsd(Math.min(m.perImage.low[0], m.perImage.low[1]))}/image
+                </option>
+              ))}
+            </select>
+            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {model.note}
+            </span>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
               Final size
             </span>
             <select
@@ -259,7 +296,10 @@ export function GeneratePanel({
             </label>
           </div>
           <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-            The model draws at the closest of 1024×1024, 1536×1024 or 1024×1536; each result then opens in the cropper at exactly {width || "?"}×{height || "?"}px.
+            {model.customSizes
+              ? `Drawn at ${draw.width}×${draw.height} (the same shape as your size)`
+              : `Drawn at ${draw.width}×${draw.height}, the closest of this model's three sizes`}
+            ; each result then opens in the cropper at exactly {width || "?"}×{height || "?"}px.
           </p>
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
@@ -267,11 +307,10 @@ export function GeneratePanel({
             </span>
             <Segmented
               value={quality}
-              options={[
-                { value: "low", label: "Low" },
-                { value: "medium", label: "Medium" },
-                { value: "high", label: "High" },
-              ]}
+              options={(["low", "medium", "high"] as const).map((q) => ({
+                value: q,
+                label: `${q[0].toUpperCase()}${q.slice(1)} ${formatUsd(model.perImage[q][draw.square ? 0 : 1])}`,
+              }))}
               onChange={setQuality}
               ariaLabel="Quality"
             />
@@ -286,9 +325,27 @@ export function GeneratePanel({
               ))}
             </select>
           </label>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {mockMode ? "No OpenAI key on the server - placeholder images are generated." : `About $${cost.toFixed(2)} on your OpenAI account (approximate).`}
-          </p>
+          <div className="flex flex-col gap-1 rounded-lg border px-3 py-2" style={{ borderColor: "var(--border-hairline)", background: "var(--page-plane)" }}>
+            <span className="flex items-baseline justify-between gap-2 text-sm" style={{ color: "var(--text-primary)" }}>
+              <span>Estimated cost</span>
+              <span className="font-semibold tabular">{formatUsd(cost)}</span>
+            </span>
+            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {count} × {formatUsd(perImage)} per {draw.square ? "square" : "non-square"} image at {quality} quality, plus the prompt
+              {references.length ? `. The ${references.length} reference image${references.length === 1 ? "" : "s"} add input cost (shown after generating)` : ""}
+              {model.derived ? ". OpenAI lists token rates only for this model, so the per-image figure uses GPT Image 2's counts" : ""}.
+            </span>
+            {lastCost && !mockMode ? (
+              <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                Last run: {formatUsd(lastCost.usd)} actual for {lastCost.images} image{lastCost.images === 1 ? "" : "s"} ({imageModel(lastCost.model)?.label ?? lastCost.model}, from OpenAI&apos;s usage)
+              </span>
+            ) : null}
+            {mockMode ? (
+              <span className="text-[11px]" style={{ color: "var(--status-warning)" }}>
+                No OpenAI key on the server - placeholder images are generated at no cost.
+              </span>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={() => void generate()}

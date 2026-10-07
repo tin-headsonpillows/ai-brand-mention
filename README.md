@@ -70,18 +70,24 @@ Find, crop and download images as JPG:
   result shows its size and source page.
 - **Instagram profile** (SerpApi `instagram_profile`): a public account's
   recent posts, 1 credit per page.
-- **AI generator** (OpenAI image model, `OPENAI_IMAGE_MODEL`, default
-  `gpt-image-1`): prompt, optional reference images (upload or link), quality
-  low / medium / high with an approximate cost, 1-4 variations. The model draws
-  at the closest of 1024x1024 / 1536x1024 / 1024x1536 and the result opens in
-  the cropper at the exact size you asked for.
+- **AI generator**: pick the OpenAI model (GPT Image 2.5 Flare / Sunburst,
+  GPT Image 2, 1.5, 1 Mini, 1; the list and prices live in
+  `src/lib/images/models.ts`), prompt, optional reference images (upload or
+  link), quality low / medium / high, 1-4 variations. The panel shows the
+  estimated cost before generating (OpenAI's per-image prices) and the actual
+  cost afterwards (from the token usage OpenAI returns). GPT Image 2 and newer
+  draw at your exact shape; older models draw at the closest of
+  1024x1024 / 1536x1024 / 1024x1536. Results open in the cropper at the exact
+  size you asked for.
 - **Crop & download**: crop to an exact size (presets or custom) with a box
   locked to the output's shape, or resize keeping the original proportions,
   then download one JPG or a ZIP of several. Remote images go through a
   server-side proxy (`/api/images/proxy`, which refuses private/internal
   addresses) so the browser can read their pixels.
-- **Library**: generated images and downloaded JPGs are kept per project in
-  Vercel Blob, so they can be re-downloaded or re-cropped later.
+- **Library**: generated images, Google / Instagram results saved with
+  "Save to library" (original file, fetched server-side, no SerpApi credits),
+  and downloaded JPGs are kept per project in Vercel Blob, so they can be
+  re-downloaded or re-cropped later.
 
 ## Getting started
 
@@ -121,8 +127,8 @@ deployer's:
 |---|---|---|---|
 | `OPENAI_API_KEY` | For real runs | - | Your OpenAI API key. Without it, the app uses mock mode. |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | Chat model used both to generate prompt variations and to answer them. Can be overridden per-run in the UI's "Advanced options". |
-| `SERPAPI_API_KEY` (or `SERPAPI_API_KEY_1..8`) | For real SerpApi data | - | Google Search Tracking, the Reviews tab, and the ChatGPT tab's local comparison. Several numbered keys fail over to the next when one runs out of searches. |
-| `OPENAI_IMAGE_MODEL` | No | `gpt-image-1` | Image model for the Images tab's generator (your OpenAI organisation may need to be verified to use it). |
+| `SERPAPI_API_KEY` (or `SERPAPI_API_KEY_1..20`) | For real SerpApi data | - | Google Search Tracking, the Reviews tab, and the ChatGPT tab's local comparison. Several numbered keys fail over to the next when one runs out of searches. |
+| `OPENAI_IMAGE_MODEL` | No | `gpt-image-2.5-flare` | Default model in the Images tab's generator until a viewer picks another (must be one listed in `src/lib/images/models.ts`; your OpenAI organisation may need to be verified to use GPT Image models). |
 | `BLOB_READ_WRITE_TOKEN` | For tracking & reviews | - | Vercel Blob store that holds tracking history and fetched reviews. |
 | `LOCAL_BLOB_DIR` | No | - | Local development only: store those JSON documents in this folder instead of Vercel Blob. |
 

@@ -1,25 +1,15 @@
 import { toFile } from "openai";
 import { getOpenAIClient, isMockMode } from "../openai";
 import { fetchPublicImage } from "./safeFetch";
+import { DEFAULT_IMAGE_MODEL, drawSize, imageModel, usageCost, type ImageModelInfo } from "./models";
 import type { GenerateQuality } from "./types";
 
-/** OpenAI's image model; override with OPENAI_IMAGE_MODEL when a newer one is available on the account. */
-export const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
+/** Server default when the browser doesn't pick a model; OPENAI_IMAGE_MODEL overrides it if it's a known model. */
+export function defaultImageModel(): ImageModelInfo {
+  return imageModel(process.env.OPENAI_IMAGE_MODEL?.trim()) ?? imageModel(DEFAULT_IMAGE_MODEL)!;
+}
 export const MAX_REFERENCES = 4;
 export const MAX_VARIATIONS = 4;
-
-type ModelSize = "1024x1024" | "1536x1024" | "1024x1536";
-
-/**
- * The model renders at one of three sizes; pick the one whose shape is closest to the requested size. The
- * browser then crops/resizes to the exact pixels asked for, so nothing is ever stretched.
- */
-export function modelSize(width: number, height: number): ModelSize {
-  const ratio = width / height;
-  if (ratio >= 1.2) return "1536x1024";
-  if (ratio <= 1 / 1.2) return "1024x1536";
-  return "1024x1024";
-}
 
 export interface Reference {
   /** data:image/...;base64,... from an upload (downscaled in the browser). */
@@ -50,27 +40,33 @@ export interface GeneratedImage {
   height: number;
 }
 
+export interface GenerateResult {
+  images: GeneratedImage[];
+  /** What OpenAI reported for the request (0 in mock mode or when usage isn't returned). */
+  costUsd: number;
+}
+
 /**
  * Generates `n` images from a prompt, guided by reference images when given (the edit endpoint takes them
- * as visual input). Returns JPEGs at the model size closest to the requested shape.
+ * as visual input). Returns JPEGs at the model's draw size for the requested shape, plus the request's cost.
  */
 export async function generateImages(input: {
+  model: ImageModelInfo;
   prompt: string;
   width: number;
   height: number;
   quality: GenerateQuality;
   n: number;
   references: Reference[];
-}): Promise<GeneratedImage[]> {
-  const size = modelSize(input.width, input.height);
-  const [w, h] = size.split("x").map(Number);
-  if (isMockMode()) return mockImages(input.prompt, input.n, w, h);
+}): Promise<GenerateResult> {
+  const { width: w, height: h } = drawSize(input.model, input.width, input.height);
+  if (isMockMode()) return { images: mockImages(input.prompt, input.n, w, h), costUsd: 0 };
 
   const client = getOpenAIClient();
   const common = {
-    model: IMAGE_MODEL,
+    model: input.model.id,
     prompt: input.prompt,
-    size,
+    size: `${w}x${h}`,
     quality: input.quality,
     n: input.n,
     output_format: "jpeg" as const,
@@ -83,10 +79,11 @@ export async function generateImages(input: {
       })
     : await client.images.generate(common);
 
-  return (response.data ?? [])
+  const images = (response.data ?? [])
     .map((item) => item.b64_json)
     .filter((b64): b64 is string => typeof b64 === "string")
     .map((b64) => ({ data: new Uint8Array(Buffer.from(b64, "base64")), contentType: "image/jpeg", width: w, height: h }));
+  return { images, costUsd: response.usage ? usageCost(input.model, response.usage) : 0 };
 }
 
 /** Placeholder artwork when no OpenAI key is configured, so the flow stays testable. */

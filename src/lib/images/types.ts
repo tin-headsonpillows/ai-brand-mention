@@ -40,6 +40,9 @@ export interface LibraryItem {
   sourceUrl?: string;
   pageUrl?: string;
   prompt?: string;
+  /** Generated images: the OpenAI model and this image's share of the request cost (USD). */
+  model?: string;
+  costUsd?: number;
 }
 
 export type GenerateQuality = "low" | "medium" | "high";

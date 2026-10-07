@@ -92,10 +92,15 @@ export function ImagesTab() {
   const [igUser, setIgUser] = useState<string | null>(null);
 
   const [library, setLibrary] = useState<LibraryItem[] | null>(null);
+  const [defaultModel, setDefaultModel] = useState<string | undefined>(undefined);
+  const [saving, setSaving] = useState<Set<string>>(() => new Set());
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedKeys = new Set(selection.map((s) => s.key));
+  const savedSources = new Set((library ?? []).map((i) => i.sourceUrl).filter((u): u is string => Boolean(u)));
+  const unsavedSelection = selection.filter((s) => (s.kind === "google" || s.kind === "instagram") && !savedSources.has(s.src));
 
   const loadUsage = useCallback(async () => {
     const res = await fetch("/api/tracking/usage", { cache: "no-store" }).catch(() => null);
@@ -104,9 +109,10 @@ export function ImagesTab() {
 
   const loadLibrary = useCallback(async (project: string) => {
     const res = await fetch(`/api/images/library?project=${encodeURIComponent(project)}`, { cache: "no-store" });
-    const data = (await res.json().catch(() => ({}))) as { items?: LibraryItem[]; mock?: { search: boolean; generate: boolean } };
+    const data = (await res.json().catch(() => ({}))) as { items?: LibraryItem[]; mock?: { search: boolean; generate: boolean }; defaultModel?: string };
     setLibrary(data.items ?? []);
     if (data.mock) setMock(data.mock);
+    if (data.defaultModel) setDefaultModel(data.defaultModel);
   }, []);
 
   useEffect(() => {
@@ -208,6 +214,48 @@ export function ImagesTab() {
     }
   }
 
+  /** Saves Google / Instagram results to the project library at their original size (no SerpApi credits). */
+  async function saveToLibrary(images: SelectedImage[]) {
+    if (!projectId) return;
+    const todo = images.filter((i) => (i.kind === "google" || i.kind === "instagram") && !savedSources.has(i.src) && !saving.has(i.src));
+    if (todo.length === 0) return;
+    setSaving((s) => new Set([...s, ...todo.map((i) => i.src)]));
+    setNotice(null);
+    try {
+      const res = await fetch("/api/images/library/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: projectId,
+          images: todo.map((i) => ({ url: i.src, kind: i.kind, title: i.title, pageUrl: i.pageUrl })),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { saved?: LibraryItem[]; already?: LibraryItem[]; failed?: Array<{ url: string; error: string }>; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Couldn't save to the library");
+      const savedCount = (data.saved?.length ?? 0) + (data.already?.length ?? 0);
+      const failed = data.failed ?? [];
+      setNotice(
+        [
+          savedCount ? `Saved ${savedCount} image${savedCount === 1 ? "" : "s"} to the library.` : "",
+          failed.length ? `${failed.length} couldn't be downloaded (${failed[0].error}) - the site may block downloads; try Crop & download instead.` : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
+      await loadLibrary(projectId);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Couldn't save to the library");
+    } finally {
+      setSaving((s) => {
+        const next = new Set(s);
+        todo.forEach((i) => next.delete(i.src));
+        return next;
+      });
+    }
+  }
+
+  const libraryActions = { saved: savedSources, saving, onSave: (images: SelectedImage[]) => void saveToLibrary(images) };
+
   async function deleteLibraryItem(id: string) {
     if (!projectId) return;
     await fetch(`/api/images/library?project=${encodeURIComponent(projectId)}&id=${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -216,7 +264,7 @@ export function ImagesTab() {
   }
 
   return (
-    <div className="flex flex-col gap-5 pb-24">
+    <div className="flex flex-col gap-5 pb-32 sm:pb-24">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
@@ -249,6 +297,7 @@ export function ImagesTab() {
           onChange={(v) => {
             setSource(v);
             setError(null);
+            setNotice(null);
           }}
           ariaLabel="Image source"
         />
@@ -290,7 +339,7 @@ export function ImagesTab() {
           </div>
           {googleHits.length > 0 ? (
             <>
-              <ImageGrid images={googleHits} selected={selectedKeys} onToggle={toggle} />
+              <ImageGrid images={googleHits} selected={selectedKeys} onToggle={toggle} library={libraryActions} />
               {googleMore ? (
                 <button type="button" onClick={() => void searchGoogle(googlePage + 1)} disabled={loading} className="self-center rounded-lg border px-4 py-2 text-sm disabled:opacity-50" style={{ borderColor: "var(--border-hairline)", color: "var(--text-primary)" }}>
                   {loading ? "Loading..." : "Load more (1 credit)"}
@@ -298,7 +347,7 @@ export function ImagesTab() {
               ) : null}
             </>
           ) : !loading ? (
-            <EmptyState title="Search Google Images" body="Results show each image's size and source; select the ones you want, then crop and download them as JPG." />
+            <EmptyState title="Search Google Images" body="Results show each image's size and source; select the ones you want, then crop and download them as JPG or save them to the project library." />
           ) : null}
         </section>
       ) : source === "instagram" ? (
@@ -345,7 +394,7 @@ export function ImagesTab() {
           ) : null}
           {igHits.length > 0 ? (
             <>
-              <ImageGrid images={igHits} selected={selectedKeys} onToggle={toggle} />
+              <ImageGrid images={igHits} selected={selectedKeys} onToggle={toggle} library={libraryActions} />
               {igToken ? (
                 <button type="button" onClick={() => void loadInstagram(true)} disabled={loading} className="self-center rounded-lg border px-4 py-2 text-sm disabled:opacity-50" style={{ borderColor: "var(--border-hairline)", color: "var(--text-primary)" }}>
                   {loading ? "Loading..." : "Load more posts (1 credit)"}
@@ -363,6 +412,7 @@ export function ImagesTab() {
             selected={selectedKeys}
             onToggle={toggle}
             mockMode={mock?.generate ?? false}
+            defaultModel={defaultModel}
             onGenerated={(made) => {
               setSelection((s) => [...s, ...made.filter((m) => !s.some((x) => x.key === m.key))]);
               void loadLibrary(projectId);
@@ -378,23 +428,43 @@ export function ImagesTab() {
           {error}
         </p>
       ) : null}
+      {notice ? (
+        <p className="text-sm" role="status" style={{ color: "var(--text-secondary)" }}>
+          {notice}{" "}
+          <button type="button" onClick={() => setNotice(null)} className="underline" style={{ color: "var(--text-muted)" }}>
+            Dismiss
+          </button>
+        </p>
+      ) : null}
 
       {selection.length > 0 ? (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t px-4 py-3" style={{ borderColor: "var(--border-hairline)", background: "var(--surface-1)", boxShadow: "0 -4px 16px rgba(0,0,0,0.08)" }}>
-          <div className="mx-auto flex max-w-[1440px] items-center gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-end gap-2 sm:gap-3">
+            <div className="hidden min-w-0 flex-1 items-center gap-1.5 overflow-x-auto sm:flex">
               {selection.map((s) => (
                 // eslint-disable-next-line @next/next/no-img-element -- selection thumbnails
                 <img key={s.key} src={s.thumb} alt="" referrerPolicy="no-referrer" title={s.title} className="h-10 w-10 shrink-0 rounded object-cover" />
               ))}
             </div>
-            <span className="text-sm whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>
+            <span className="mr-auto text-sm whitespace-nowrap sm:mr-0" style={{ color: "var(--text-secondary)" }}>
               {selection.length} selected
             </span>
             <button type="button" onClick={() => setSelection([])} className="rounded-lg border px-3 py-1.5 text-xs" style={{ borderColor: "var(--border-hairline)", color: "var(--text-primary)" }}>
               Clear
             </button>
-            <button type="button" onClick={() => setStudioOpen(true)} disabled={!projectId} className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "var(--series-1)" }}>
+            {unsavedSelection.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => void saveToLibrary(unsavedSelection)}
+                disabled={!projectId || unsavedSelection.every((s) => saving.has(s.src))}
+                className="rounded-lg border px-3 py-2 text-sm font-medium whitespace-nowrap disabled:opacity-50"
+                style={{ borderColor: "var(--series-1)", color: "var(--series-1)" }}
+                title="Keep the original images in this project's library (no SerpApi credits)"
+              >
+                {unsavedSelection.some((s) => saving.has(s.src)) ? "Saving..." : `Save ${unsavedSelection.length} to library`}
+              </button>
+            ) : null}
+            <button type="button" onClick={() => setStudioOpen(true)} disabled={!projectId} className="rounded-lg px-4 py-2 text-sm font-semibold whitespace-nowrap text-white disabled:opacity-50" style={{ background: "var(--series-1)" }}>
               Crop &amp; download
             </button>
           </div>

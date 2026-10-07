@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { deleteFromLibrary, listLibrary, saveToLibrary } from "@/lib/images/library";
+import { defaultImageModel } from "@/lib/images/generate";
 import { isImagesMock } from "@/lib/images/search";
 import { isMockMode } from "@/lib/openai";
 import { resolveProject } from "@/lib/tracking/store";
@@ -11,7 +12,11 @@ const MAX_BYTES = 4 * 1024 * 1024;
 export async function GET(req: NextRequest) {
   const projectId = await resolveProject(req.nextUrl.searchParams.get("project"));
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
-  return Response.json({ items: await listLibrary(projectId), mock: { search: isImagesMock(), generate: isMockMode() } });
+  return Response.json({
+    items: await listLibrary(projectId),
+    mock: { search: isImagesMock(), generate: isMockMode() },
+    defaultModel: defaultImageModel().id,
+  });
 }
 
 /** Saves an exported JPG. Body: the image bytes; details in the query string. */

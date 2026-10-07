@@ -27,6 +27,24 @@ export async function saveToLibrary(
   return item;
 }
 
+/** Saves several images with one index update (imports from search results). */
+export async function saveManyToLibrary(
+  projectId: string,
+  entries: Array<{ meta: Omit<LibraryItem, "id" | "createdAt" | "bytes">; data: Uint8Array }>
+): Promise<LibraryItem[]> {
+  const created: LibraryItem[] = [];
+  for (const { meta, data } of entries) {
+    const item: LibraryItem = { ...meta, id: crypto.randomUUID(), createdAt: new Date().toISOString(), bytes: data.byteLength };
+    await writeBinary(filePath(projectId, item.id), data, item.contentType);
+    created.push(item);
+  }
+  if (created.length) {
+    const items = await listLibrary(projectId);
+    await writeJson(indexPath(projectId), { items: [...created, ...items] } satisfies LibraryIndex);
+  }
+  return created;
+}
+
 export async function readLibraryFile(projectId: string, id: string): Promise<{ data: Uint8Array; item: LibraryItem } | null> {
   if (!validId(id)) return null;
   const item = (await listLibrary(projectId)).find((i) => i.id === id);

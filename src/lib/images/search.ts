@@ -72,9 +72,11 @@ export async function fetchInstagramProfile(
   pageToken: string | null
 ): Promise<{ profile: InstagramProfile | null; hits: ImageHit[]; nextPageToken: string | null }> {
   if (isImagesMock()) return mockInstagram(username, pageToken);
+  // SerpApi wants profile_id on every page; next_page_token alone is rejected ("Missing query `profile_id`").
   const data = await serpRequest({
     engine: "instagram_profile",
-    ...(pageToken ? { next_page_token: pageToken } : { profile_id: username }),
+    profile_id: username,
+    ...(pageToken ? { next_page_token: pageToken } : {}),
   });
   // Profile details and posts live under profile_results; later pages may return posts at the top level.
   const info = obj(data.profile_results);

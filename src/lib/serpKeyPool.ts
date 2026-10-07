@@ -4,13 +4,13 @@
  * fall over to the next configured key instead of failing.
  */
 
-const MAX_POOL_SIZE = 8;
+const MAX_POOL_SIZE = 20;
 
 export function getServerApiKeys(): string[] {
   const keys: string[] = [];
   for (let i = 1; i <= MAX_POOL_SIZE; i++) {
     const key = process.env[`SERPAPI_API_KEY_${i}`]?.trim();
-    if (key) keys.push(key);
+    if (key && !keys.includes(key)) keys.push(key);
   }
   const legacy = process.env.SERPAPI_API_KEY?.trim();
   if (legacy && !keys.includes(legacy)) keys.push(legacy);
