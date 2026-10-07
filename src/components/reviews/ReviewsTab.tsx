@@ -2,11 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlaceDoc, PlaceSummary, SyncEvent } from "@/lib/reviews/types";
+import type { ProjectSummary } from "@/lib/tracking/types";
 import { EmptyState, SelectControl } from "@/components/tracking/ui";
-import { AddBusinessDialog } from "./AddBusinessDialog";
+import { ProjectBar, type NewProjectInput } from "@/components/tracking/ProjectBar";
+import { AddBusinessDialog, CAP_OPTIONS, HISTORY_OPTIONS } from "./AddBusinessDialog";
 import { ReviewsDashboard } from "./ReviewsDashboard";
 
 const STORAGE_KEY = "reviews.place";
+/** Shared with Google Search Tracking, so both tabs open on the same project. */
+const PROJECT_STORAGE_KEY = "tracking.project";
+/** Mirrors FETCH_VERSION in lib/reviews/sync.ts: older completed fetches may have stopped early. */
+const FETCH_VERSION = 2;
 /** Each sync request is time-boxed server-side; this bounds how many the client chains for one run. */
 const MAX_SYNC_ROUNDS = 25;
 
@@ -30,17 +36,45 @@ function readStored(): string | null {
   }
 }
 
-function store(id: string) {
+function store(id: string, key = STORAGE_KEY) {
   try {
-    localStorage.setItem(STORAGE_KEY, id);
+    localStorage.setItem(key, id);
   } catch {
     // private mode etc. - only a convenience
   }
 }
 
+function readKey(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** True while the stored reviews don't yet cover the business's history window (or were fetched by the old, early-stopping logic). */
+function needsFetch(doc: PlaceDoc): boolean {
+  return doc.fetch.phase !== "done" || (doc.fetch.version ?? 1) < FETCH_VERSION;
+}
+
+/**
+ * Rough SerpApi credits to finish fetching: 1 per page (8 reviews on the first Google Maps page, then 20;
+ * smaller pages on Google Hotels). A restarted pass re-reads the pages already stored.
+ */
+function remainingCredits(doc: PlaceDoc): number {
+  if (!needsFetch(doc)) return 0;
+  const perPage = doc.place.source === "maps" ? 20 : 10;
+  const target = Math.min(doc.place.reviewCount ?? doc.settings.maxReviews, doc.settings.maxReviews);
+  const remaining = Math.max(0, target - doc.reviews.length);
+  const reread = doc.fetch.nextPageToken ? 0 : Math.ceil(doc.reviews.length / perPage);
+  return Math.max(1, reread + Math.ceil(remaining / perPage) + (doc.fetch.nextPageToken ? 0 : 1));
+}
+
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 export function ReviewsTab() {
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceSummary[] | null>(null);
   const [mock, setMock] = useState<{ reviews: boolean; analysis: boolean } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -50,12 +84,13 @@ export function ReviewsTab() {
   const [sync, setSync] = useState<SyncState>(idleSync);
   const abortRef = useRef<AbortController | null>(null);
 
-  const loadPlaces = useCallback(async () => {
-    const res = await fetch("/api/reviews/places", { cache: "no-store" });
-    const data = (await res.json()) as { places: PlaceSummary[]; mock: { reviews: boolean; analysis: boolean } };
-    setPlaces(data.places);
-    setMock(data.mock);
-    return data.places;
+  const loadPlaces = useCallback(async (project: string) => {
+    const res = await fetch(`/api/reviews/places?project=${encodeURIComponent(project)}`, { cache: "no-store" });
+    const data = (await res.json()) as { places?: PlaceSummary[]; mock?: { reviews: boolean; analysis: boolean } };
+    const list = data.places ?? [];
+    setPlaces(list);
+    if (data.mock) setMock(data.mock);
+    return list;
   }, []);
 
   const loadDoc = useCallback(async (id: string) => {
@@ -68,13 +103,56 @@ export function ReviewsTab() {
 
   useEffect(() => {
     async function init() {
-      const list = await loadPlaces();
-      const stored = readStored();
-      const initial = list.find((p) => p.id === stored)?.id ?? list[0]?.id ?? null;
-      setSelectedId(initial);
+      const res = await fetch("/api/tracking/projects", { cache: "no-store" });
+      const list = ((await res.json()) as { projects?: ProjectSummary[] }).projects ?? [];
+      setProjects(list);
+      const remembered = readKey(PROJECT_STORAGE_KEY);
+      setProjectId(list.find((p) => p.id === remembered)?.id ?? list[0]?.id ?? null);
     }
     void init();
-  }, [loadPlaces]);
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    async function load(project: string) {
+      setPlaces(null);
+      setDoc(null);
+      setSelectedId(null);
+      const list = await loadPlaces(project);
+      if (cancelled) return;
+      const stored = readStored();
+      setSelectedId(list.find((p) => p.id === stored)?.id ?? list[0]?.id ?? null);
+    }
+    void load(projectId);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, loadPlaces]);
+
+  const createProject = useCallback(async (input: NewProjectInput) => {
+    const res = await fetch("/api/tracking/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+    if (!res.ok || !body.id) throw new Error(body.error || `Couldn't create the project (status ${res.status})`);
+    const list = ((await (await fetch("/api/tracking/projects", { cache: "no-store" })).json()) as { projects: ProjectSummary[] }).projects;
+    setProjects(list);
+    store(body.id, PROJECT_STORAGE_KEY);
+    setProjectId(body.id);
+  }, []);
+
+  async function changeSettings(next: { monthsBack?: number; maxReviews?: number }) {
+    if (!doc) return;
+    await fetch("/api/reviews/places", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: doc.id, ...next }),
+    });
+    await loadDoc(doc.id);
+  }
 
   useEffect(() => {
     if (!selectedId) return;
@@ -132,21 +210,28 @@ export function ReviewsTab() {
         if ((err as Error).name !== "AbortError") setSync((s) => ({ ...s, error: err instanceof Error ? err.message : "Sync failed" }));
       } finally {
         setSync((s) => ({ ...s, running: false, message: null }));
-        void loadPlaces();
+        if (projectId) void loadPlaces(projectId);
       }
     },
-    [loadDoc, loadPlaces]
+    [loadDoc, loadPlaces, projectId]
   );
 
   async function removePlace() {
-    if (!doc || !window.confirm(`Remove ${doc.place.name} and its stored reviews?`)) return;
-    await fetch(`/api/reviews/places?id=${encodeURIComponent(doc.id)}`, { method: "DELETE" });
-    const list = await loadPlaces();
+    if (!doc || !projectId) return;
+    const shared = (doc.projectIds?.length ?? 1) > 1;
+    const message = shared
+      ? `Remove ${doc.place.name} from this project? Its reviews stay saved for the other project(s) using it.`
+      : `Remove ${doc.place.name} and delete its ${doc.reviews.length} saved reviews? Fetching them again would cost SerpApi credits.`;
+    if (!window.confirm(message)) return;
+    await fetch(`/api/reviews/places?id=${encodeURIComponent(doc.id)}&project=${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    const list = await loadPlaces(projectId);
     setDoc(null);
     setSelectedId(list[0]?.id ?? null);
   }
 
-  const incomplete = doc ? doc.fetch.phase !== "done" || doc.reviews.some((r) => !r.analysis) : false;
+  const fetchPending = doc ? needsFetch(doc) : false;
+  const incomplete = doc ? fetchPending || doc.reviews.some((r) => !r.analysis) : false;
+  const credits = doc ? remainingCredits(doc) : 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -161,6 +246,17 @@ export function ReviewsTab() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {projects.length > 0 ? (
+            <ProjectBar
+              projects={projects}
+              activeId={projectId}
+              onSelect={(id) => {
+                store(id, PROJECT_STORAGE_KEY);
+                setProjectId(id);
+              }}
+              onCreate={createProject}
+            />
+          ) : null}
           {places && places.length > 0 && selectedId ? (
             <SelectControl
               value={selectedId}
@@ -229,13 +325,25 @@ export function ReviewsTab() {
                 </span>
                 <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
                   {doc.place.rating ? `${doc.place.rating.toFixed(1)} ★ on Google` : ""}
-                  {doc.place.reviewCount ? ` · ${doc.place.reviewCount.toLocaleString()} reviews in total` : ""}
-                  {` · ${doc.reviews.length.toLocaleString()} fetched (last ${doc.settings.monthsBack} months, cap ${doc.settings.maxReviews.toLocaleString()})`}
+                  {doc.place.reviewCount ? ` · ${doc.place.reviewCount.toLocaleString()} reviews on Google` : ""}
+                  {` · ${doc.reviews.length.toLocaleString()} saved`}
                   {doc.lastSyncedAt ? ` · updated ${fmtDate(doc.lastSyncedAt)}` : ""}
-                  {` · ${doc.searchesUsed} SerpApi searches used`}
+                  {` · ${doc.searchesUsed} SerpApi credits spent so far`}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <SelectControl
+                  value={String(doc.settings.monthsBack)}
+                  options={HISTORY_OPTIONS}
+                  onChange={(v) => void changeSettings({ monthsBack: Number(v) })}
+                  ariaLabel="History to keep"
+                />
+                <SelectControl
+                  value={String(doc.settings.maxReviews)}
+                  options={CAP_OPTIONS}
+                  onChange={(v) => void changeSettings({ maxReviews: Number(v) })}
+                  ariaLabel="Review cap"
+                />
                 {sync.running ? (
                   <button
                     type="button"
@@ -249,11 +357,21 @@ export function ReviewsTab() {
                   <button
                     type="button"
                     onClick={() => void runSync(doc.id, !incomplete)}
-                    className="rounded-lg border px-3 py-1.5 text-xs font-medium"
-                    style={{ borderColor: "var(--border-hairline)", color: "var(--text-primary)" }}
-                    title={incomplete ? "Continue fetching and analysing" : "Fetch reviews posted since the last update"}
+                    className="rounded-lg px-3 py-1.5 text-xs font-semibold"
+                    style={
+                      fetchPending
+                        ? { background: "var(--series-1)", color: "#fff" }
+                        : { border: "1px solid var(--border-hairline)", color: "var(--text-primary)" }
+                    }
+                    title={
+                      fetchPending
+                        ? "Fetch the reviews not saved yet - saved reviews are never fetched twice"
+                        : incomplete
+                          ? "Finish analysing the saved reviews (no SerpApi credits)"
+                          : "Fetch reviews posted since the last update (usually 1 credit)"
+                    }
                   >
-                    {incomplete ? "Resume" : "Refresh"}
+                    {fetchPending ? `Fetch remaining (~${credits} credits)` : incomplete ? "Finish analysis" : "Refresh"}
                   </button>
                 )}
                 <button type="button" onClick={() => void removePlace()} disabled={sync.running} className="rounded-lg px-2 py-1.5 text-xs disabled:opacity-50" style={{ color: "var(--text-muted)" }}>
@@ -310,16 +428,18 @@ export function ReviewsTab() {
         </>
       )}
 
-      {adding ? (
+      {adding && projectId ? (
         <AddBusinessDialog
+          projectId={projectId}
           onClose={() => setAdding(false)}
-          onAdded={(id) => {
+          onAdded={(id, reused) => {
             setAdding(false);
             store(id);
             void (async () => {
-              await loadPlaces();
+              await loadPlaces(projectId);
               setSelectedId(id);
-              await runSync(id, false);
+              // A business already saved under another project brings its reviews along - nothing to fetch.
+              if (!reused) await runSync(id, false);
             })();
           }}
         />

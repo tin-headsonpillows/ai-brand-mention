@@ -4,30 +4,34 @@ import { useState } from "react";
 import type { PlaceRef, ReviewSource } from "@/lib/reviews/types";
 import { Segmented, SelectControl } from "@/components/tracking/ui";
 
-const MONTHS = [
+export const HISTORY_OPTIONS = [
   { value: "3", label: "Last 3 months" },
   { value: "6", label: "Last 6 months" },
   { value: "12", label: "Last 12 months" },
   { value: "24", label: "Last 24 months" },
+  { value: "0", label: "All history" },
 ];
-const CAPS = [
+export const CAP_OPTIONS = [
   { value: "200", label: "Up to 200 reviews" },
   { value: "500", label: "Up to 500 reviews" },
   { value: "1000", label: "Up to 1,000 reviews" },
   { value: "2000", label: "Up to 2,000 reviews" },
+  { value: "5000", label: "Up to 5,000 reviews" },
 ];
 
 /** Google Maps pages hold 8 reviews first, then 20; Google Hotels pages are smaller, so this is an upper bound there. */
 function searchEstimate(source: ReviewSource, cap: number): string {
-  return source === "maps" ? `up to ${1 + Math.ceil((cap - 8) / 20)}` : `up to ${Math.ceil(cap / 10)}`;
+  return source === "maps" ? `Up to ${1 + Math.ceil(Math.max(0, cap - 8) / 20)}` : `Up to ${Math.ceil(cap / 10)}`;
 }
 
 export function AddBusinessDialog({
+  projectId,
   onClose,
   onAdded,
 }: {
+  projectId: string;
   onClose: () => void;
-  onAdded: (id: string) => void;
+  onAdded: (id: string, reused: boolean) => void;
 }) {
   const [source, setSource] = useState<ReviewSource>("maps");
   const [query, setQuery] = useState("");
@@ -35,7 +39,7 @@ export function AddBusinessDialog({
   const [candidates, setCandidates] = useState<PlaceRef[] | null>(null);
   const [picked, setPicked] = useState<PlaceRef | null>(null);
   const [monthsBack, setMonthsBack] = useState("12");
-  const [maxReviews, setMaxReviews] = useState("500");
+  const [maxReviews, setMaxReviews] = useState("1000");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -67,11 +71,11 @@ export function AddBusinessDialog({
       const res = await fetch("/api/reviews/places", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ place: picked, monthsBack: Number(monthsBack), maxReviews: Number(maxReviews) }),
+        body: JSON.stringify({ place: picked, monthsBack: Number(monthsBack), maxReviews: Number(maxReviews), project: projectId }),
       });
-      const data = (await res.json()) as { id?: string; error?: string };
+      const data = (await res.json()) as { id?: string; reused?: boolean; error?: string };
       if (!res.ok || !data.id) throw new Error(data.error ?? "Could not add this business");
-      onAdded(data.id);
+      onAdded(data.id, Boolean(data.reused));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add this business");
       setSaving(false);
@@ -180,10 +184,11 @@ export function AddBusinessDialog({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <SelectControl value={monthsBack} options={MONTHS} onChange={setMonthsBack} ariaLabel="History to fetch" />
-          <SelectControl value={maxReviews} options={CAPS} onChange={setMaxReviews} ariaLabel="Review cap" />
+          <SelectControl value={monthsBack} options={HISTORY_OPTIONS} onChange={setMonthsBack} ariaLabel="History to fetch" />
+          <SelectControl value={maxReviews} options={CAP_OPTIONS} onChange={setMaxReviews} ariaLabel="Review cap" />
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Uses {searchEstimate(source, Number(maxReviews))} SerpApi searches (1 per page of reviews). Later refreshes only fetch new reviews.
+            {searchEstimate(source, Math.min(Number(maxReviews), picked?.reviewCount ?? Number(maxReviews)))} SerpApi credits (1 per page of
+            reviews). Reviews are saved to this project - refreshes only fetch new ones, and adding the same business to another project reuses them.
           </span>
         </div>
 

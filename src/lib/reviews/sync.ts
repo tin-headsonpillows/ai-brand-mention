@@ -12,6 +12,9 @@ const TOTAL_BUDGET_MS = 230_000;
 const SAVE_EVERY_PAGES = 4;
 const ANALYZE_BATCH = 15;
 const ANALYZE_CONCURRENCY = 5;
+/** A refresh page with this many already-stored reviews means we've caught up. */
+const REFRESH_KNOWN_THRESHOLD = 3;
+export const FETCH_VERSION = 2;
 
 function pending(doc: PlaceDoc): Review[] {
   return doc.reviews.filter((r) => !r.analysis);
@@ -46,11 +49,18 @@ export async function syncPlace(
     return;
   }
   const before = { fetched: doc.reviews.length, analyzed: doc.reviews.length - pending(doc).length };
-  if (refresh && doc.fetch.phase === "done") doc.fetch = { phase: "refresh", nextPageToken: null, pagesFetched: 0 };
+  if (doc.fetch.phase === "done" && (doc.fetch.version ?? 1) < FETCH_VERSION) {
+    // Fetched by the old logic, which could stop early on an out-of-order review: walk the history again.
+    // Stored reviews are skipped, so this only re-spends the pages already fetched.
+    doc.fetch = { phase: "backfill", nextPageToken: null, pagesFetched: 0, version: FETCH_VERSION };
+  } else if (refresh && doc.fetch.phase === "done") {
+    doc.fetch = { phase: "refresh", nextPageToken: null, pagesFetched: 0, version: FETCH_VERSION };
+  }
 
   // --- Fetch -----------------------------------------------------------------------------------
   const now = new Date();
-  const cutoff = monthsBefore(now, doc.settings.monthsBack).toISOString();
+  // monthsBack 0 = the business's whole review history.
+  const cutoff = doc.settings.monthsBack > 0 ? monthsBefore(now, doc.settings.monthsBack).toISOString() : null;
   const known = new Set(doc.reviews.map((r) => r.id));
   let addedThisRefresh = 0;
   let pagesSinceSave = 0;
@@ -78,15 +88,19 @@ export async function syncPlace(
     }
     if (page.topics?.length) doc.topics = page.topics;
 
+    // Google's "newest first" isn't strictly ordered - an old review that was recently edited can sit among
+    // new ones - so a single out-of-window or already-stored review never ends the fetch on its own.
     let stop = !page.nextPageToken || page.reviews.length === 0;
+    let knownOnPage = 0;
+    let outsideWindow = 0;
+    let added = 0;
     for (const review of page.reviews) {
       if (known.has(review.id)) {
-        // A refresh has caught up with what's stored.
-        if (doc.fetch.phase === "refresh") stop = true;
+        knownOnPage++;
         continue;
       }
-      if (doc.fetch.phase === "backfill" && review.date < cutoff) {
-        stop = true;
+      if (doc.fetch.phase === "backfill" && cutoff && review.date < cutoff) {
+        outsideWindow++;
         continue;
       }
       if (doc.fetch.phase === "backfill" && doc.reviews.length >= doc.settings.maxReviews) {
@@ -95,13 +109,20 @@ export async function syncPlace(
       }
       known.add(review.id);
       doc.reviews.push(review);
+      added++;
       if (doc.fetch.phase === "refresh") addedThisRefresh++;
     }
+    const pageSize = page.reviews.length;
+    // Backfill: most of the page predates the window. (A lone old review is an out-of-order edit, and stored
+    // reviews say nothing about where the window ends, so neither counts.)
+    if (doc.fetch.phase === "backfill" && pageSize > 0 && outsideWindow * 2 >= pageSize) stop = true;
+    // Refresh: caught up once a page is mostly reviews we already have, or brings nothing new.
+    if (doc.fetch.phase === "refresh" && (added === 0 || knownOnPage >= REFRESH_KNOWN_THRESHOLD)) stop = true;
     if (doc.fetch.phase === "refresh" && addedThisRefresh >= doc.settings.maxReviews) stop = true;
     doc.reviews.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
     if (stop) {
-      doc.fetch = { phase: "done", nextPageToken: null, pagesFetched: doc.fetch.pagesFetched };
+      doc.fetch = { phase: "done", nextPageToken: null, pagesFetched: doc.fetch.pagesFetched, version: FETCH_VERSION };
       doc.lastSyncedAt = now.toISOString();
     } else {
       doc.fetch.nextPageToken = page.nextPageToken;
@@ -137,6 +158,7 @@ export async function syncPlace(
       }
       emit({ type: "status", message: "Analysing sentiment and points of praise or criticism..." });
       let failures = 0;
+      let lastError = "";
       while (pending(doc).length > 0 && Date.now() - started < TOTAL_BUDGET_MS && !isAborted()) {
         const todo = pending(doc).slice(0, ANALYZE_BATCH * ANALYZE_CONCURRENCY);
         const batches: Review[][] = [];
@@ -148,8 +170,9 @@ export async function syncPlace(
           async (batch) => {
             try {
               return await analyzeBatch(batch, doc.taxonomy, DEFAULT_MODEL);
-            } catch {
+            } catch (err) {
               failures++;
+              lastError = err instanceof Error ? err.message : String(err);
               return new Map();
             }
           },
@@ -169,7 +192,10 @@ export async function syncPlace(
         if (analyzedThisRound === 0) {
           emit({
             type: "error",
-            message: failures > 0 ? "The analysis model returned errors - try again shortly." : "Some reviews could not be analysed.",
+            message:
+              failures > 0
+                ? `The OpenAI analysis failed: ${lastError.slice(0, 200)}. Reviews are saved; press Resume once the OpenAI key works.`
+                : "Some reviews could not be analysed.",
           });
           break;
         }

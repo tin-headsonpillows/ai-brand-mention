@@ -21,6 +21,8 @@ import { ReviewList, SENTIMENT_COLOR, SENTIMENT_LABEL } from "./ReviewList";
 
 const pct = (v: number | null) => (v === null ? "–" : `${Math.round(v * 100)}%`);
 const pts = (v: number) => `${Math.round(v * 100)} pts`;
+/** Share differences rounded to whole points first, so "+0 pts" never shows as a rise or fall. */
+const ptsDiff = (a: number, b: number) => Math.round((a - b) * 100) / 100;
 
 const SENTIMENT_ORDER: Sentiment[] = ["positive", "mixed", "neutral", "negative"];
 
@@ -90,10 +92,10 @@ function RatingDistribution({ rows }: { rows: Array<{ stars: number; count: numb
       {rows.map((r) => (
         <div key={r.stars} className="grid grid-cols-[2.5rem_minmax(0,1fr)_4.5rem] items-center gap-2 text-xs">
           <span className="tabular" style={{ color: "var(--text-secondary)" }}>
-            {r.stars} ★
+            {r.stars} <span style={{ color: "var(--rating-star)" }}>★</span>
           </span>
           <div className="h-3 rounded" style={{ background: "var(--page-plane)" }}>
-            <div className="h-3 rounded" style={{ width: `${(r.count / max) * 100}%`, background: "var(--de-emphasis)", minWidth: r.count ? 3 : 0 }} />
+            <div className="h-3 rounded" style={{ width: `${(r.count / max) * 100}%`, background: "var(--rating-star)", minWidth: r.count ? 3 : 0 }} />
           </div>
           <span className="text-right tabular" style={{ color: "var(--text-primary)" }}>
             {r.count} <span style={{ color: "var(--text-muted)" }}>({total ? Math.round((r.count / total) * 100) : 0}%)</span>
@@ -259,7 +261,7 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
           value={k.avgRating === null ? "–" : k.avgRating.toFixed(2)}
           delta={
             prev && k.avgRating !== null && prev.avgRating !== null ? (
-              <Delta value={k.avgRating - prev.avgRating} format={(v) => v.toFixed(2)} title={deltaTitle} />
+              <Delta value={Math.round((k.avgRating - prev.avgRating) * 100) / 100} format={(v) => v.toFixed(2)} title={deltaTitle} />
             ) : undefined
           }
         />
@@ -268,7 +270,7 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
           value={pct(k.positiveShare)}
           delta={
             prev && k.positiveShare !== null && prev.positiveShare !== null ? (
-              <Delta value={k.positiveShare - prev.positiveShare} format={pts} title={deltaTitle} />
+              <Delta value={ptsDiff(k.positiveShare, prev.positiveShare)} format={pts} title={deltaTitle} />
             ) : undefined
           }
         />
@@ -277,7 +279,7 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
           value={pct(k.negativeShare)}
           delta={
             prev && k.negativeShare !== null && prev.negativeShare !== null ? (
-              <Delta value={k.negativeShare - prev.negativeShare} format={pts} higherIsBetter={false} title={deltaTitle} />
+              <Delta value={ptsDiff(k.negativeShare, prev.negativeShare)} format={pts} higherIsBetter={false} title={deltaTitle} />
             ) : undefined
           }
         />
@@ -286,7 +288,7 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
           value={pct(k.responseRate)}
           delta={
             prev && k.responseRate !== null && prev.responseRate !== null ? (
-              <Delta value={k.responseRate - prev.responseRate} format={pts} title={deltaTitle} />
+              <Delta value={ptsDiff(k.responseRate, prev.responseRate)} format={pts} title={deltaTitle} />
             ) : undefined
           }
         />

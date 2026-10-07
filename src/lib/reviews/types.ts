@@ -56,7 +56,7 @@ export interface Review {
 }
 
 export interface PlaceSettings {
-  /** How far back the first fetch goes. */
+  /** How far back the first fetch goes; 0 = all history. */
   monthsBack: number;
   /** Hard cap on stored reviews, to bound SerpApi usage. */
   maxReviews: number;
@@ -67,10 +67,14 @@ export interface FetchState {
   phase: "backfill" | "refresh" | "done";
   nextPageToken: string | null;
   pagesFetched: number;
+  /** Version of the fetch logic that last completed a pass (older passes may have stopped early). */
+  version?: number;
 }
 
 export interface PlaceDoc {
   id: string;
+  /** Google Search Tracking projects this business belongs to (missing on older docs = the default project). */
+  projectIds?: string[];
   place: PlaceRef;
   settings: PlaceSettings;
   createdAt: string;
@@ -88,8 +92,12 @@ export interface PlaceDoc {
 
 export interface PlaceSummary {
   id: string;
+  projectIds?: string[];
   name: string;
   source: ReviewSource;
+  dataId?: string;
+  placeId?: string;
+  propertyToken?: string;
   address?: string;
   rating?: number;
   reviewCount?: number;

@@ -29,8 +29,17 @@ Add any business from Google Maps (search by name or paste a Maps link), or a
 hotel from Google Hotels (Google reviews plus partner sites such as
 Tripadvisor). The app pulls its reviews newest-first through SerpApi
 (`google_maps_reviews` / `google_hotels_reviews`), up to the history window
-and review cap you pick, and stores them in Vercel Blob so later refreshes
-only fetch what's new.
+(3-24 months, or all history) and review cap you pick, and stores them in
+Vercel Blob so later refreshes only fetch what's new. Businesses belong to
+the same projects as Google Search Tracking; adding a business that is
+already saved under another project reuses its reviews instead of fetching
+them again. Widening a business's window or cap later fetches only the
+missing reviews (plus a re-read of pages already stored).
+
+Google's "newest first" order isn't strict - recently edited old reviews
+appear among new ones - so a fetch only stops when most of a page is older
+than the window, and a refresh stops once a page is mostly reviews already
+saved.
 
 Each review is analysed for overall sentiment and for the specific points it
 praises or criticises. Points are sorted into a fixed set of aspects chosen

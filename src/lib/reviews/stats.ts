@@ -38,8 +38,8 @@ export function asOf(doc: PlaceDoc): number {
 
 /** How far back the stored reviews are complete (the fetch window, or the oldest review if the cap cut it short). */
 export function historyStart(doc: PlaceDoc): number {
-  const windowStart = monthsBefore(new Date(asOf(doc)), doc.settings.monthsBack).getTime();
   const oldest = doc.reviews.length ? Date.parse(doc.reviews[doc.reviews.length - 1].date) : asOf(doc);
+  const windowStart = doc.settings.monthsBack > 0 ? monthsBefore(new Date(asOf(doc)), doc.settings.monthsBack).getTime() : oldest;
   return doc.reviews.length >= doc.settings.maxReviews ? Math.max(windowStart, oldest) : windowStart;
 }
 

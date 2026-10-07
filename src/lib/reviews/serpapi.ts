@@ -322,7 +322,8 @@ function mockReviewsPage(place: PlaceRef, pageToken: string | null, now: Date): 
   for (let i = page * MOCK_PAGE_SIZE; i < Math.min(MOCK_TOTAL, (page + 1) * MOCK_PAGE_SIZE); i++) {
     const rng = mulberry32(seed + i * 7919);
     // Reviews get sparser further back; a rough patch around 4-5 months ago tilts negative.
-    const daysAgo = Math.floor(i * 1.25 + rng() * 1.5);
+    // Like real Google data, one recently edited old review sits out of order near the top.
+    const daysAgo = i === 12 ? 1000 : Math.floor(i * 1.25 + rng() * 1.5);
     const date = new Date(now.getTime() - daysAgo * 86_400_000);
     const roughPatch = daysAgo > 120 && daysAgo < 160;
     const negativeChance = roughPatch ? 0.55 : 0.2;

@@ -24,7 +24,7 @@ export function Stars({ rating }: { rating: number | null }) {
   const full = Math.round(rating);
   return (
     <span className="tabular text-xs" style={{ color: "var(--text-secondary)" }} aria-label={`${rating} out of 5`}>
-      <span style={{ color: "#E3A008" }}>{"★".repeat(full)}</span>
+      <span style={{ color: "var(--rating-star)" }}>{"★".repeat(full)}</span>
       <span style={{ color: "var(--gridline)" }}>{"★".repeat(5 - full)}</span>
     </span>
   );
