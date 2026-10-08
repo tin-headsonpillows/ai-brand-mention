@@ -1,5 +1,14 @@
-/** Google Maps reviews (google_maps_reviews) or Google Hotels reviews (google_hotels_reviews, which also carries partner sources). */
-export type ReviewSource = "maps" | "hotels";
+/**
+ * Google Maps reviews (google_maps_reviews), Google Hotels reviews (google_hotels_reviews, which also carries partner
+ * sources) or Tripadvisor (tripadvisor_reviews + tripadvisor_place).
+ */
+export type ReviewSource = "maps" | "hotels" | "tripadvisor";
+
+export const SOURCE_LABEL: Record<ReviewSource, string> = {
+  maps: "Google Maps",
+  hotels: "Google Hotels",
+  tripadvisor: "Tripadvisor",
+};
 
 export interface PlaceRef {
   source: ReviewSource;
@@ -9,6 +18,10 @@ export interface PlaceRef {
   placeId?: string;
   /** Google Hotels property token, for google_hotels_reviews. */
   propertyToken?: string;
+  /** Tripadvisor location ID (the number after "-d" in its URLs), for tripadvisor_reviews. */
+  tripadvisorId?: string;
+  /** Link to the listing on its own site. */
+  link?: string;
   address?: string;
   rating?: number;
   reviewCount?: number;
@@ -36,6 +49,8 @@ export interface ReviewAnalysis {
 
 export interface Review {
   id: string;
+  /** Headline the reviewer gave (Tripadvisor). */
+  title?: string;
   /** ISO timestamp. Google Hotels only reports relative dates ("2 weeks ago"), so those are approximate. */
   date: string;
   dateApprox: boolean;
@@ -54,7 +69,36 @@ export interface Review {
   /** Per-aspect star ratings Google collects (e.g. rooms / service / location, or food / service / atmosphere). */
   subratings?: Record<string, number>;
   response?: { date?: string; text: string };
+  /** Who the reviewer travelled with (Tripadvisor: Couples, Family, Friends, Business, Solo). */
+  tripType?: string;
+  /** Language code of the review as written (Tripadvisor). */
+  language?: string;
   analysis?: ReviewAnalysis;
+}
+
+/** A Tripadvisor listing's own profile data (tripadvisor_place): ranking, category scores, AI summary, highlights. */
+export interface TripadvisorProfile {
+  fetchedAt: string;
+  type?: string;
+  rating?: number;
+  reviews?: number;
+  /** e.g. "#12 of 1,873 hotels in Paris". */
+  ranking?: string;
+  /** Category scores out of 5 (Location, Rooms, Value, Cleanliness, Service, Sleep Quality, Food...). */
+  subratings: Array<{ category: string; score: number }>;
+  /** Review counts by rating label (Excellent ... Terrible). */
+  distribution: Array<{ label: string; count: number }>;
+  /** Tripadvisor's AI-generated summary of the reviews. */
+  summary?: string;
+  /** Tripadvisor's review highlights per category, with quotes. */
+  highlights: Array<{ category: string; value?: string; summary: string; quotes: string[] }>;
+  award?: { type: string; year?: string };
+  stars?: string;
+  /** Traveller styles the listing ranks for (e.g. Romantic, Family, Value). */
+  styles: Array<{ tag: string; ranking?: number }>;
+  amenities: string[];
+  priceLevel?: string;
+  link?: string;
 }
 
 export interface PlaceSettings {
@@ -94,6 +138,8 @@ export interface PlaceDoc {
   taxonomy: string[];
   /** Google Maps' own review topics (keyword + mention count across all reviews). */
   topics: Array<{ keyword: string; mentions: number }>;
+  /** Tripadvisor listings: the profile, refreshed with each sync. */
+  tripadvisor?: TripadvisorProfile;
   analyzer: "openai" | "heuristic" | null;
   /** SerpApi searches spent on this place so far. */
   searchesUsed: number;
@@ -108,10 +154,14 @@ export interface PlaceSummary {
   dataId?: string;
   placeId?: string;
   propertyToken?: string;
+  tripadvisorId?: string;
   address?: string;
   rating?: number;
   reviewCount?: number;
   thumbnail?: string;
+  /** Tripadvisor ranking line, when known. */
+  ranking?: string;
+  website?: string;
   storedReviews: number;
   lastSyncedAt: string | null;
 }

@@ -3,7 +3,7 @@ import { runWithConcurrency } from "../concurrency";
 import { analysisText, analyzeBatch, analyzeHeuristic, buildTaxonomy, heuristicTaxonomy } from "./analyze";
 import { monthsBefore } from "./dates";
 import { FETCH_VERSION, looksTruncated } from "./coverage";
-import { SORT_ORDERS, fetchReviewsPage } from "./serpapi";
+import { SORT_ORDERS, fetchReviewsPage, fetchTripadvisorProfile } from "./serpapi";
 import { readPlace, writePlace } from "./store";
 import type { PlaceDoc, Review, SyncEvent } from "./types";
 
@@ -65,6 +65,24 @@ export async function syncPlace(
       : { ...doc.fetch, version: FETCH_VERSION };
   } else if (refresh && doc.fetch.phase === "done") {
     doc.fetch = { phase: "refresh", nextPageToken: null, pagesFetched: 0, version: FETCH_VERSION };
+  }
+
+  // --- Tripadvisor profile (ranking, category scores, AI summary, highlights): first sync and every refresh ---------
+  const profileStale = !doc.tripadvisor || (doc.fetch.phase === "refresh" && now.getTime() - Date.parse(doc.tripadvisor.fetchedAt) > 3_600_000);
+  if (doc.place.source === "tripadvisor" && profileStale && !isAborted()) {
+    emit({ type: "status", message: "Reading the Tripadvisor listing..." });
+    try {
+      const { profile, placeInfo } = await fetchTripadvisorProfile(doc.place, now);
+      doc.searchesUsed++;
+      doc.tripadvisor = profile;
+      for (const [key, value] of Object.entries(placeInfo)) {
+        if (value !== undefined) (doc.place as unknown as Record<string, unknown>)[key] = value;
+      }
+      await writePlace(doc);
+    } catch (err) {
+      // The reviews still come through; the profile is retried on the next sync.
+      emit({ type: "error", message: `Couldn't read the Tripadvisor listing: ${err instanceof Error ? err.message : String(err)}` });
+    }
   }
 
   // --- Fetch -----------------------------------------------------------------------------------

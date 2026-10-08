@@ -72,12 +72,23 @@ function ReviewItem({ review, focusAspect }: { review: Review; focusAspect?: str
           </span>
         ) : null}
         {review.analysis ? <SentimentBadge sentiment={review.analysis.sentiment} /> : null}
+        {review.tripType ? (
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {review.tripType}
+          </span>
+        ) : null}
         {review.link ? (
           <a href={review.link} target="_blank" rel="noreferrer" className="ml-auto text-xs hover:underline" style={{ color: "var(--series-1)" }}>
-            View on Google
+            View on {review.source === "Tripadvisor" && /tripadvisor\./i.test(review.link) ? "Tripadvisor" : "Google"}
           </a>
         ) : null}
       </div>
+
+      {review.title ? (
+        <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+          {review.title}
+        </p>
+      ) : null}
 
       {text ? (
         <p className="text-sm whitespace-pre-line" style={{ color: "var(--text-secondary)" }}>

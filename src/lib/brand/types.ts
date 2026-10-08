@@ -126,6 +126,34 @@ export interface BrandSettings {
   claudeModel: string;
   /** Weekly automatic cycle (plus Run now). */
   schedule: "weekly" | "off";
+  /**
+   * The project's review listings (Google Maps / Tripadvisor / Google Hotels) that are the brand's own. Unset = picked
+   * automatically by matching the listing name with the brand name and aliases.
+   */
+  reviewListings?: string[];
+  /** Check the brand's review listings for new reviews with each weekly run. */
+  refreshReviews: boolean;
+}
+
+/** How a topic compares between what customers say in reviews and what AI answers say. */
+export type GapStatus = "aligned" | "missing" | "contradicts" | "ai-only";
+export type GapTone = "positive" | "negative" | "mixed" | "none";
+
+export interface CustomerGapItem {
+  topic: string;
+  customers: GapTone;
+  ai: GapTone;
+  status: GapStatus;
+  note: string;
+}
+
+/** AI answers vs customer reviews, generated after each run (and on demand). */
+export interface CustomerGap {
+  generatedAt: string;
+  cycleId: string | null;
+  reviews: number;
+  summary: string;
+  items: CustomerGapItem[];
 }
 
 export type FactVerdict = "correct" | "incorrect";

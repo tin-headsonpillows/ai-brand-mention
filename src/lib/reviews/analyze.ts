@@ -4,9 +4,12 @@ import type { PlaceRef, Review, ReviewAnalysis, ReviewPoint, Sentiment } from ".
 const MAX_ASPECTS = 14;
 const MAX_POINTS_PER_REVIEW = 6;
 
-/** The text to analyse: Google's English translation when there is one. */
+/** The text to analyse: Google's English translation when there is one, after the review's headline (Tripadvisor). */
 export function analysisText(review: Review): string {
-  return (review.textEn ?? review.text).trim();
+  const body = (review.textEn ?? review.text).trim();
+  const title = review.title?.trim();
+  if (!title || body.toLowerCase().startsWith(title.toLowerCase())) return body;
+  return body ? `${title}${/[.!?]$/.test(title) ? "" : "."} ${body}` : title;
 }
 
 function ratingSentiment(rating: number | null): Sentiment {

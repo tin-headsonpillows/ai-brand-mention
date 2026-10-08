@@ -2,7 +2,8 @@ import { DEFAULT_MODEL, getOpenAIClient, isMockMode } from "../openai";
 import { countMentionsAny } from "../mentions";
 import type { TrackedBrand, TrackedCompetitor } from "../tracking/types";
 import { tokenCost } from "./pricing";
-import type { BrandInAnswer, BrandResponse, Claim, PerceptionSegment, PerceptionSummary, ResponseAnalysis, Sentiment } from "./types";
+import type { CustomerVoice } from "./customers";
+import type { BrandInAnswer, BrandResponse, Claim, CustomerGapItem, GapStatus, GapTone, PerceptionSegment, PerceptionSummary, ResponseAnalysis, Sentiment } from "./types";
 
 /** The analysis model (the app's OPENAI_MODEL, gpt-4o-mini by default): cheap, JSON mode. */
 export const ANALYSIS_MODEL = DEFAULT_MODEL;
@@ -169,16 +170,38 @@ export interface SuggestedPrompt {
   topic: string;
 }
 
-/** Questions people would plausibly ask an AI where this brand should show up (branded and category questions). */
+/** What the brand's review listings say about it, to ground suggestions in its real category, location and audience. */
+export interface SuggestContext {
+  listings: string[];
+  praised: string[];
+  criticised: string[];
+  travellers: string[];
+}
+
+/** The decision-making intents suggestions are grouped by. */
+export const SUGGEST_TOPICS = ["Comparisons", "Worth it?", "Reviews", "Best for", "Right fit", "Who it suits"] as const;
+
+/**
+ * Questions that don't help anyone choose: price lists, nearby activities, directions, opening hours. "Is it worth
+ * the price" is a decision question and stays.
+ */
+const NOT_DECISION =
+  /\b(price range|how much (does|is|are|do)|what (is|are) the (price|cost|rates?)|cheapest (price|rate)|prices? (list|per night)|things to do|activities (near|around|in)|what to do|attractions? (near|around)|nearby|near(by)? (restaurants|attractions)|how (to|do i) get (to|there)|directions|opening hours|check-?in time|phone number|address of)\b/i;
+
+export function isDecisionPrompt(text: string): boolean {
+  return !NOT_DECISION.test(text);
+}
+
 export async function suggestPrompts(
   brand: TrackedBrand,
   competitors: TrackedCompetitor[],
   keywords: string[],
   existing: string[],
   count: number,
-  locale: string
+  locale: string,
+  context?: SuggestContext
 ): Promise<{ prompts: SuggestedPrompt[]; costUsd: number }> {
-  if (isMockMode()) return { prompts: mockSuggestions(brand, keywords, count), costUsd: 0 };
+  if (isMockMode()) return { prompts: mockSuggestions(brand, competitors, keywords, count, context), costUsd: 0 };
   const client = getOpenAIClient();
   const completion = await client.chat.completions.create({
     model: ANALYSIS_MODEL,
@@ -188,32 +211,168 @@ export async function suggestPrompts(
       {
         role: "system",
         content: [
-          `Suggest ${count} questions real customers would type into ChatGPT, Claude or Google AI Mode when researching the products/services of "${brand.name}"${brand.website ? ` (${brand.website})` : ""}.`,
-          "Mix: about one third branded (naming the brand: reviews, comparisons with competitors, prices, what's included, is it worth it) and two thirds unbranded",
-          "(category and need questions where the brand should appear: best options, recommendations, how to choose, for specific traveller types/occasions).",
-          `Market/locale: ${locale}. Write in the language customers in that market would use.`,
-          "Each question natural and specific (6-16 words). Group them with a short topic (1-3 words, e.g. Pricing, Comparisons, Family trips).",
-          'Return ONLY JSON: {"prompts": [{"text": string, "topic": string}]}.',
+          `Suggest ${count + 6} questions people type into ChatGPT, Claude or Google AI Mode while DECIDING whether to choose "${brand.name}"${brand.website ? ` (${brand.website})` : ""} or one of its alternatives.`,
+          "First work out from the context what kind of business it is (e.g. luxury hotel, resort, cruise, restaurant, tour) and where it is; use that category and location in the questions.",
+          "Every question must be consultative or comparative and help someone make a choice. Use these intents, as the topic of each question:",
+          '"Comparisons" - the brand against a named competitor or two ("X vs Y: which is better for a honeymoon?");',
+          '"Worth it?" - value and quality judgements ("Is X worth the price for a family of four?", "pros and cons of X");',
+          '"Reviews" - what guests say ("X reviews: what do guests say about the service?");',
+          '"Best for" - shortlists by purpose and place ("best [category] for [purpose] in [location]", e.g. best luxury hotels for a honeymoon in Da Nang);',
+          '"Right fit" - which option suits a specific need ("which [category] in [location] is best for travellers with young kids / a wheelchair / remote work?");',
+          '"Who it suits" - who the brand is best suited for ("Who is X best suited for?", "is X good for solo travellers?").',
+          "About half should name the brand (Comparisons, Worth it?, Reviews, Who it suits) and half should be unbranded category questions where the brand should appear (Best for, Right fit).",
+          "Use real purposes and needs from the context (traveller types, what customers praise or criticise). Use the competitors' names in comparisons.",
+          "Do NOT write generic questions, price-range or 'how much does it cost' questions, lists of nearby activities or things to do, directions, opening hours or booking how-tos.",
+          `Market/locale: ${locale}. Write in the language customers in that market would use. Each question natural and specific (6-18 words).`,
+          `Return ONLY JSON: {"prompts": [{"text": string, "topic": one of ${SUGGEST_TOPICS.map((t) => `"${t}"`).join(", ")}}]}.`,
         ].join(" "),
       },
       {
         role: "user",
-        content: [
-          competitors.length ? `Competitors: ${competitors.map((c) => c.name).join(", ")}` : "",
-          keywords.length ? `Keywords they track on Google: ${keywords.slice(0, 40).join(", ")}` : "",
-          existing.length ? `Already tracked (don't repeat): ${existing.slice(0, 80).join(" | ")}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n") || "(no other context)",
+        content:
+          [
+            competitors.length ? `Competitors: ${competitors.map((c) => c.name).join(", ")}` : "",
+            keywords.length ? `Keywords they track on Google: ${keywords.slice(0, 40).join(", ")}` : "",
+            context?.listings.length ? `The brand's review listings: ${context.listings.join(" | ")}` : "",
+            context?.travellers.length ? `Who reviews it most (trip types): ${context.travellers.join(", ")}` : "",
+            context?.praised.length ? `What customers praise: ${context.praised.join(", ")}` : "",
+            context?.criticised.length ? `What customers criticise: ${context.criticised.join(", ")}` : "",
+            existing.length ? `Already tracked (don't repeat): ${existing.slice(0, 80).join(" | ")}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n") || "(no other context)",
       },
     ],
   });
   const raw = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as { prompts?: unknown };
+  const taken = new Set(existing.map((e) => e.trim().toLowerCase()));
   const prompts = (Array.isArray(raw.prompts) ? raw.prompts : [])
-    .map((p) => ({ text: str((p as Record<string, unknown>)?.text, 300), topic: str((p as Record<string, unknown>)?.topic, 40) || "General" }))
-    .filter((p) => p.text.length > 5)
+    .map((p) => {
+      const topic = str((p as Record<string, unknown>)?.topic, 40);
+      return { text: str((p as Record<string, unknown>)?.text, 300), topic: (SUGGEST_TOPICS as readonly string[]).includes(topic) ? topic : topic || "Comparisons" };
+    })
+    .filter((p) => p.text.length > 5 && isDecisionPrompt(p.text) && !taken.has(p.text.toLowerCase()))
     .slice(0, count);
   return { prompts, costUsd: completionCost(completion.usage) };
+}
+
+// --- AI answers vs customer reviews ------------------------------------------------------------------------
+
+/** What AI answers say about the brand, grouped by attribute, as input for the comparison. */
+export interface AiClaimGroup {
+  attribute: string;
+  positive: number;
+  negative: number;
+  neutral: number;
+  examples: string[];
+}
+
+const GAP_STATUSES: GapStatus[] = ["aligned", "missing", "contradicts", "ai-only"];
+const GAP_TONES: GapTone[] = ["positive", "negative", "mixed", "none"];
+
+/** Compares what customers say in reviews with what AI answers say, topic by topic. */
+export async function compareWithCustomers(
+  brand: TrackedBrand,
+  ai: AiClaimGroup[],
+  voice: CustomerVoice
+): Promise<{ summary: string; items: CustomerGapItem[]; costUsd: number }> {
+  if (isMockMode()) return { ...mockGap(ai, voice), costUsd: 0 };
+  const client = getOpenAIClient();
+  const customerLines = [
+    `Reviews analysed: ${voice.totals.analysed} (average rating ${voice.totals.avgRating ?? "?"}/5)`,
+    ...voice.bySource.map((s) => `${s.label}: ${s.reviews} reviews, avg ${s.avgRating ?? "?"}/5, ${s.positiveShare ?? "?"}% positive${s.ranking ? `, ${s.ranking}` : ""}`),
+    "Praised:",
+    ...voice.praise.map((a) => `+ ${a.aspect} (${a.count} reviews, ${a.share}%): ${a.quotes.map((q) => `"${q}"`).join(" ")}`),
+    "Criticised:",
+    ...voice.criticism.map((a) => `- ${a.aspect} (${a.count} reviews, ${a.share}%): ${a.quotes.map((q) => `"${q}"`).join(" ")}`),
+    voice.tripadvisor?.summary ? `Tripadvisor's own review summary: ${voice.tripadvisor.summary}` : "",
+    voice.tripTypes.length ? `Trip types: ${voice.tripTypes.map((t) => `${t.type} ${t.count} (avg ${t.avgRating ?? "?"})`).join(", ")}` : "",
+  ].filter(Boolean);
+  const aiLines = ai.length
+    ? ai.map((g) => `${g.attribute}: ${g.positive} positive, ${g.negative} negative, ${g.neutral} neutral claims. e.g. ${g.examples.map((e) => `"${e}"`).join(" ")}`)
+    : ["(AI answers made no claims about the brand)"];
+  const completion = await client.chat.completions.create({
+    model: ANALYSIS_MODEL,
+    temperature: 0.2,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: [
+          `You compare what AI answer engines (ChatGPT, Claude, Google AI Mode and AI Overviews) say about "${brand.name}" with what its customers say in reviews (Google Maps, Tripadvisor).`,
+          "Return the 6-10 topics that matter most to people deciding whether to choose this brand. For each topic:",
+          '"topic" (1-3 words, Title Case); "customers" and "ai": how each side treats it - "positive", "negative", "mixed", or "none" when that side doesn\'t raise it;',
+          '"status": "aligned" (both agree), "missing" (customers raise it, AI answers don\'t), "contradicts" (they disagree), or "ai-only" (AI claims it, customers don\'t raise it);',
+          '"note": one sentence (max 25 words) with the evidence and what it means for the brand.',
+          "Prioritise strengths customers love that AI misses, and AI claims customers contradict. Only use the evidence given.",
+          'Also "summary": two sentences on how well AI answers reflect the real customer experience.',
+          'Return ONLY JSON: {"summary": string, "items": [{"topic": string, "customers": string, "ai": string, "status": string, "note": string}]}.',
+        ].join(" "),
+      },
+      { role: "user", content: `WHAT CUSTOMERS SAY\n${customerLines.join("\n")}\n\nWHAT AI ANSWERS SAY\n${aiLines.join("\n")}` },
+    ],
+  });
+  const raw = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as { summary?: unknown; items?: unknown };
+  const items: CustomerGapItem[] = (Array.isArray(raw.items) ? raw.items : [])
+    .map((x) => x as Record<string, unknown>)
+    .map((x) => ({
+      topic: str(x.topic, 60),
+      customers: GAP_TONES.includes(x.customers as GapTone) ? (x.customers as GapTone) : "none",
+      ai: GAP_TONES.includes(x.ai as GapTone) ? (x.ai as GapTone) : "none",
+      status: GAP_STATUSES.includes(x.status as GapStatus) ? (x.status as GapStatus) : "aligned",
+      note: str(x.note, 240),
+    }))
+    .filter((x) => x.topic)
+    .slice(0, 12);
+  return { summary: str(raw.summary, 600), items, costUsd: completionCost(completion.usage) };
+}
+
+function mockGap(ai: AiClaimGroup[], voice: CustomerVoice): { summary: string; items: CustomerGapItem[] } {
+  const aiTone = (topic: string): GapTone => {
+    const words = topic.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3);
+    const g = ai.find((a) => words.some((w) => a.attribute.toLowerCase().includes(w)));
+    if (!g) return "none";
+    return g.positive && g.negative ? "mixed" : g.negative > g.positive ? "negative" : "positive";
+  };
+  const items: CustomerGapItem[] = [
+    ...voice.praise.slice(0, 4).map((a) => {
+      const t = aiTone(a.aspect);
+      return {
+        topic: a.aspect,
+        customers: "positive" as GapTone,
+        ai: t,
+        status: (t === "none" ? "missing" : t === "negative" ? "contradicts" : "aligned") as GapStatus,
+        note: t === "none" ? `${a.share}% of reviews praise this, but AI answers don't mention it.` : `Praised in ${a.share}% of reviews; AI answers ${t === "negative" ? "are critical" : "agree"}.`,
+      };
+    }),
+    ...voice.criticism
+      .filter((a) => !voice.praise.slice(0, 4).some((p) => p.aspect === a.aspect))
+      .slice(0, 3)
+      .map((a) => {
+      const t = aiTone(a.aspect);
+      return {
+        topic: a.aspect,
+        customers: "negative" as GapTone,
+        ai: t,
+        status: (t === "none" ? "missing" : t === "positive" ? "contradicts" : "aligned") as GapStatus,
+        note: t === "positive" ? `AI answers praise this, but ${a.share}% of reviews complain about it.` : `${a.share}% of reviews criticise this${t === "none" ? "; AI answers don't raise it" : ", and AI answers agree"}.`,
+      };
+    }),
+    ...ai
+      .filter((g) => !voice.praise.concat(voice.criticism).some((a) => aiTone(a.aspect) !== "none" && g.attribute.toLowerCase().includes(a.aspect.toLowerCase().split(/[^a-z]+/)[0] ?? "")))
+      .slice(0, 2)
+      .map((g) => ({
+        topic: g.attribute,
+        customers: "none" as GapTone,
+        ai: (g.negative > g.positive ? "negative" : "positive") as GapTone,
+        status: "ai-only" as GapStatus,
+        note: `AI answers bring this up (${g.positive + g.negative + g.neutral} claims), but reviews rarely do.`,
+      })),
+  ];
+  return {
+    summary: "Placeholder comparison (no OpenAI key): AI answers echo some of what customers praise, but miss several strengths reviewers mention often. Add the OpenAI key for a real comparison.",
+    items,
+  };
 }
 
 // --- Placeholders (no OpenAI key) --------------------------------------------------------------------------
@@ -290,18 +449,24 @@ function mockSummary(brand: TrackedBrand, claims: Array<Claim & { platform: stri
   return { paragraphs, generatedAt: new Date().toISOString() };
 }
 
-function mockSuggestions(brand: TrackedBrand, keywords: string[], count: number): SuggestedPrompt[] {
+function mockSuggestions(brand: TrackedBrand, competitors: TrackedCompetitor[], keywords: string[], count: number, context?: SuggestContext): SuggestedPrompt[] {
   const name = brand.name || "this brand";
+  const rivals = competitors.length ? competitors.map((c) => c.name) : ["Heritage Line", "Paradise Cruises"];
+  const place = keywords[0] ?? "Halong Bay cruise";
+  const travellers = context?.travellers.length ? context.travellers.map((t) => t.toLowerCase()) : ["couples", "families"];
   const base: SuggestedPrompt[] = [
-    { text: `Is ${name} worth the price?`, topic: "Pricing" },
-    { text: `${name} reviews from recent guests`, topic: "Reviews" },
-    { text: `${name} vs Heritage Line - which is better?`, topic: "Comparisons" },
-    { text: "Best luxury Halong Bay cruise for couples", topic: "Recommendations" },
-    { text: "Which Halong Bay cruise is best for families with young kids?", topic: "Family trips" },
-    { text: "Quiet Halong Bay cruise routes away from the crowds", topic: "Itineraries" },
-    { text: "2-night Lan Ha Bay cruise with good food recommendations", topic: "Recommendations" },
-    { text: "Overnight cruise in Vietnam for a honeymoon", topic: "Occasions" },
-    ...keywords.slice(0, 6).map((k) => ({ text: `What is the best option for ${k}?`, topic: "Keywords" })),
+    { text: `${name} vs ${rivals[0]}: which is better for a honeymoon?`, topic: "Comparisons" },
+    { text: `${name} or ${rivals[1] ?? rivals[0]} for a family with young kids?`, topic: "Comparisons" },
+    { text: `Is ${name} worth the price for ${travellers[0]}?`, topic: "Worth it?" },
+    { text: `Pros and cons of ${name} compared with other luxury options`, topic: "Worth it?" },
+    { text: `${name} reviews: what do guests say about the service and food?`, topic: "Reviews" },
+    { text: `Who is ${name} best suited for?`, topic: "Who it suits" },
+    { text: `Is ${name} a good choice for ${travellers[1] ?? "solo travellers"}?`, topic: "Who it suits" },
+    { text: `Best ${place} for a honeymoon`, topic: "Best for" },
+    { text: `Best luxury ${place} for families with young children`, topic: "Best for" },
+    { text: `Which ${place} is best for a quiet trip away from the crowds?`, topic: "Right fit" },
+    { text: `Which ${place} suits travellers with limited mobility?`, topic: "Right fit" },
+    { text: `Best ${place} for a special birthday or anniversary`, topic: "Best for" },
   ];
   return base.slice(0, count);
 }

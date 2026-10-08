@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
   const raw = body?.place;
   const name = optionalString(raw?.name);
-  const source = raw?.source === "hotels" ? "hotels" : raw?.source === "maps" ? "maps" : null;
+  const source = raw?.source === "hotels" || raw?.source === "maps" || raw?.source === "tripadvisor" ? raw.source : null;
   if (!raw || !name || !source) return Response.json({ error: "Pick a business first" }, { status: 400 });
 
   const place: PlaceRef = {
@@ -51,6 +51,8 @@ export async function POST(req: NextRequest) {
     dataId: optionalString(raw.dataId),
     placeId: optionalString(raw.placeId),
     propertyToken: optionalString(raw.propertyToken),
+    tripadvisorId: /^\d{1,12}$/.test(String(raw.tripadvisorId ?? "")) ? String(raw.tripadvisorId) : undefined,
+    link: optionalString(raw.link),
     address: optionalString(raw.address),
     rating: optionalNumber(raw.rating),
     reviewCount: optionalNumber(raw.reviewCount),
@@ -63,6 +65,9 @@ export async function POST(req: NextRequest) {
   }
   if (source === "hotels" && !place.propertyToken) {
     return Response.json({ error: "This result has no Google Hotels property token" }, { status: 400 });
+  }
+  if (source === "tripadvisor" && !place.tripadvisorId) {
+    return Response.json({ error: "This result has no Tripadvisor ID" }, { status: 400 });
   }
 
   const { doc, reused } = await createPlace(place, parseSettings(body, { monthsBack: 12, maxReviews: 500 }), projectId);

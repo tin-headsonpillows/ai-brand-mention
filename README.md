@@ -25,10 +25,11 @@ locations has it swapped for each of the others.
 
 ## Google Maps Reviews tab
 
-Add any business from Google Maps (search by name or paste a Maps link), or a
-hotel from Google Hotels (Google reviews plus partner sites such as
-Tripadvisor). The app pulls its reviews newest-first through SerpApi
-(`google_maps_reviews` / `google_hotels_reviews`), up to the history window
+Add any business from Google Maps (search by name or paste a Maps link), a
+listing from Tripadvisor (hotels, restaurants, attractions and tours; search by
+name or paste a Tripadvisor link), or a hotel from Google Hotels (Google reviews
+plus partner sites). The app pulls its reviews newest-first through SerpApi
+(`google_maps_reviews` / `tripadvisor_reviews` / `google_hotels_reviews`), up to the history window
 (3-24 months, or all history) and review cap you pick, and stores them in
 Vercel Blob so later refreshes only fetch what's new. Businesses belong to
 the same projects as Google Search Tracking; adding a business that is
@@ -55,19 +56,33 @@ periods stay comparable. The dashboard filters everything by 7 days, 28 days,
   read those reviews;
 - top praise / top criticism with sample quotes, and the review list.
 
+Tripadvisor listings also show the listing's profile (`tripadvisor_place`, one
+search per sync): rating and ranking ("#7 of 214 hotels in Da Nang"), award,
+rating distribution, category scores (Location, Rooms, Value, Service...),
+Tripadvisor's AI summary of reviews and its highlights, style rankings and
+amenities. Their reviews keep the title, trip type (Couples, Family, Business,
+Friends, Solo) and per-review category ratings, and the dashboard adds a
+"who stays and how they rate it" table by trip type.
+
 Large backfills run as a series of time-boxed requests
 (`src/app/api/reviews/sync`) that the page chains automatically, so they
 stay under the function time limit. Without a server OpenAI key the analysis
 falls back to a keyword method. Without SerpApi keys the reviews are
 simulated.
 
-## Brand Mentions (Google Search Tracking -> Brand Mentions)
+## Brand Mentions tab
 
-Tracks how AI answer engines talk about the project's brand for a set of prompts (questions people ask AI):
+Tracks how AI answer engines talk about the project's brand for a set of prompts (questions people ask AI), next
+to what customers say in the brand's own reviews. It uses the same projects (brand, competitors, market) as Google
+Search Tracking; old `/google-search-tracking?view=brand-mentions` links redirect to `/brand-mentions`.
 
 - **Prompts**: type them, upload a CSV/TSV/TXT (a `prompt`/`query`/`question` column and an optional `topic`
-  column are recognised), or let ChatGPT suggest branded and unbranded questions from the brand, competitors and
-  tracked keywords. Prompts naming the brand are tagged branded automatically.
+  column are recognised), or let ChatGPT suggest them. Suggestions are decision-making questions, grouped as
+  Comparisons (brand vs a named competitor), Worth it?, Reviews, Best for ([category] for [purpose] in
+  [location]), Right fit (which option suits a specific need) and Who it suits. They draw on the brand,
+  competitors, tracked keywords and the brand's review listings (category, location, traveller types, what
+  customers praise and criticise); price-range, things-to-do and similar questions are filtered out. Prompts
+  naming the brand are tagged branded automatically.
 - **Sources**: Google AI Mode and AI Overview (SerpApi, ~3 credits per prompt), ChatGPT (OpenAI Responses API
   with web search, `gpt-5.4-mini` by default) and Claude (Anthropic Messages API with web search,
   `claude-opus-5-5` by default, with server-side refusal fallback). Models are chosen per project.
@@ -77,6 +92,14 @@ Tracks how AI answer engines talk about the project's brand for a set of prompts
   against competitors (project + auto-detected), attributes (leading / at parity / behind), brand facts to mark
   correct or incorrect, source sentiment with a claims table, and every full answer with its sources. Filters:
   date range, platform, branded / unbranded, topic.
+- **Customer reviews**: the brand's Google Maps, Tripadvisor and Google Hotels listings from the Reviews tab
+  (matched by brand name, or chosen by hand) - review volume, average rating, a customer score on the same 0-100
+  scale as the AI perception score, results per review site, what customers praise and criticise (with quotes),
+  the Tripadvisor ranking / summary / highlights, trip types, and competitor listings' ratings. The dashboard's
+  "AI answers vs. real customers" card compares the two topic by topic (aligned, AI misses it, contradicts, AI
+  only); it's generated after each run and on demand (one small `OPENAI_MODEL` call, counted in the daily limit).
+  The weekly cron also checks the brand's listings for new reviews (about 1-3 SerpApi searches per listing; can be
+  switched off).
 - **Schedule & cost control**: runs weekly (daily cron `/api/brand/run` starts due runs and continues unfinished
   ones) plus Run now. A daily spending limit (default $5, shared by all projects, editable in Costs & limits)
   pauses runs when reached; they continue the next day. Costs & limits shows today's spend and projected cost per

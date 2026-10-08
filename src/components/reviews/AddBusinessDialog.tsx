@@ -19,10 +19,28 @@ export const CAP_OPTIONS = [
   { value: "5000", label: "Up to 5,000 reviews" },
 ];
 
-/** Google Maps pages hold 8 reviews first, then 20; Google Hotels pages are smaller, so this is an upper bound there. */
+/**
+ * Google Maps pages hold 8 reviews first, then 20; Google Hotels pages are smaller, so this is an upper bound there;
+ * Tripadvisor pages hold 20, plus one search for the listing's profile.
+ */
 function searchEstimate(source: ReviewSource, cap: number): string {
-  return source === "maps" ? `Up to ${1 + Math.ceil(Math.max(0, cap - 8) / 20)}` : `Up to ${Math.ceil(cap / 10)}`;
+  if (source === "maps") return `Up to ${1 + Math.ceil(Math.max(0, cap - 8) / 20)}`;
+  if (source === "tripadvisor") return `Up to ${1 + Math.ceil(cap / 20)}`;
+  return `Up to ${Math.ceil(cap / 10)}`;
 }
+
+const SOURCE_HELP: Record<ReviewSource, string> = {
+  maps: "Works for any business. Exact review dates. Paste a Google Maps link or search by name and city.",
+  hotels: 'For hotels: Google reviews plus partner sites such as Tripadvisor. Google only shows relative dates here ("2 weeks ago").',
+  tripadvisor:
+    "Hotels, restaurants, attractions and tours on Tripadvisor: every review with exact dates, trip type and category scores, plus the listing's ranking, AI review summary and highlights. Paste a Tripadvisor link or search by name.",
+};
+
+const SOURCE_PLACEHOLDER: Record<ReviewSource, string> = {
+  maps: "e.g. Furama Resort Da Nang, or a Google Maps link",
+  hotels: "e.g. InterContinental Danang Sun Peninsula",
+  tripadvisor: "e.g. Furama Resort Danang, or a Tripadvisor link",
+};
 
 export function AddBusinessDialog({
   projectId,
@@ -91,7 +109,7 @@ export function AddBusinessDialog({
               Add a business
             </h3>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Find it on Google, choose how much review history to pull, and we&apos;ll fetch and analyse every review.
+              Find it on Google or Tripadvisor, choose how much review history to pull, and we&apos;ll fetch and analyse every review.
             </p>
           </div>
           <button type="button" onClick={onClose} className="text-sm" style={{ color: "var(--text-muted)" }} aria-label="Close">
@@ -105,6 +123,7 @@ export function AddBusinessDialog({
             options={[
               { value: "maps", label: "Google Maps reviews", title: "Any business on Google Maps" },
               { value: "hotels", label: "Google Hotels reviews", title: "Hotels - includes partner review sites" },
+              { value: "tripadvisor", label: "Tripadvisor", title: "Hotels, restaurants, attractions and tours on Tripadvisor" },
             ]}
             onChange={(v) => {
               setSource(v);
@@ -114,9 +133,7 @@ export function AddBusinessDialog({
             ariaLabel="Review source"
           />
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {source === "maps"
-              ? "Works for any business. Exact review dates. Paste a Google Maps link or search by name and city."
-              : "For hotels: Google reviews plus partner sites such as Tripadvisor. Google only shows relative dates here (\"2 weeks ago\")."}
+            {SOURCE_HELP[source]}
           </span>
         </div>
 
@@ -124,7 +141,7 @@ export function AddBusinessDialog({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={source === "maps" ? "e.g. Furama Resort Da Nang, or a Google Maps link" : "e.g. InterContinental Danang Sun Peninsula"}
+            placeholder={SOURCE_PLACEHOLDER[source]}
             className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none"
             style={{ borderColor: "var(--border-hairline)", background: "var(--page-plane)", color: "var(--text-primary)" }}
             autoFocus
@@ -160,7 +177,7 @@ export function AddBusinessDialog({
                       }}
                     >
                       {c.thumbnail ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- Google-hosted thumbnail
+                        // eslint-disable-next-line @next/next/no-img-element -- Google/Tripadvisor-hosted thumbnail
                         <img src={c.thumbnail} alt="" className="h-12 w-12 shrink-0 rounded object-cover" />
                       ) : (
                         <span className="h-12 w-12 shrink-0 rounded" style={{ background: "var(--page-plane)" }} />

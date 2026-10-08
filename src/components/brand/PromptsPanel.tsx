@@ -315,7 +315,9 @@ export function PromptsPanel({
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              ChatGPT proposes branded and unbranded questions from your brand, competitors and tracked keywords (about $0.001).
+              ChatGPT proposes the questions people ask while choosing: comparisons with competitors, &ldquo;is it worth it?&rdquo;, reviews, best
+              options for a purpose and place, and who it suits - built from your brand, competitors, keywords and what customers say in reviews
+              (about $0.001). Price-range and things-to-do questions are left out.
             </p>
             <button type="button" disabled={busy} onClick={() => void suggest()} className={primary} style={{ background: "var(--series-1)" }}>
               {busy ? "Thinking..." : suggestions.length ? "Suggest more" : "Suggest 20 prompts"}

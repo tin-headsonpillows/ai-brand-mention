@@ -26,10 +26,13 @@ export function summarize(doc: PlaceDoc): PlaceSummary {
     dataId: doc.place.dataId,
     placeId: doc.place.placeId,
     propertyToken: doc.place.propertyToken,
+    tripadvisorId: doc.place.tripadvisorId,
     address: doc.place.address,
     rating: doc.place.rating,
     reviewCount: doc.place.reviewCount,
     thumbnail: doc.place.thumbnail,
+    ranking: doc.tripadvisor?.ranking,
+    website: doc.place.website,
     storedReviews: doc.reviews.length,
     lastSyncedAt: doc.lastSyncedAt,
   };
@@ -56,12 +59,13 @@ export async function writePlace(doc: PlaceDoc): Promise<void> {
   await writeJson(INDEX_PATH, { places } satisfies ReviewsIndex);
 }
 
-function sameBusiness(a: Pick<PlaceRef, "dataId" | "placeId" | "propertyToken" | "source">, b: PlaceRef): boolean {
+function sameBusiness(a: Pick<PlaceRef, "dataId" | "placeId" | "propertyToken" | "tripadvisorId" | "source">, b: PlaceRef): boolean {
   if (a.source !== b.source) return false;
   return (
     (a.dataId !== undefined && a.dataId === b.dataId) ||
     (a.placeId !== undefined && a.placeId === b.placeId) ||
-    (a.propertyToken !== undefined && a.propertyToken === b.propertyToken)
+    (a.propertyToken !== undefined && a.propertyToken === b.propertyToken) ||
+    (a.tripadvisorId !== undefined && a.tripadvisorId === b.tripadvisorId)
   );
 }
 

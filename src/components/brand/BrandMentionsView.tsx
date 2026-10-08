@@ -9,10 +9,11 @@ import { readParam, writeParams } from "@/lib/urlState";
 import { EmptyState, IconCalendar, IconLayers, SelectControl } from "@/components/tracking/ui";
 import { AttributesGrid, BrandFacts, HeadToHead, PerceptionCard, SentimentTrend, SourceSentiment } from "./BrandCards";
 import { CostsPanel } from "./CostsPanel";
+import { AiVsCustomersCard, CustomersSection } from "./CustomersPanel";
 import { PromptsPanel } from "./PromptsPanel";
 import { ResponsesPanel } from "./ResponsesPanel";
 
-type Section = "dashboard" | "prompts" | "responses" | "costs";
+type Section = "dashboard" | "customers" | "prompts" | "responses" | "costs";
 type Range = "30" | "90" | "180" | "365" | "all";
 
 interface Payload {
@@ -26,6 +27,7 @@ interface Payload {
 
 const SECTIONS: Array<{ id: Section; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
+  { id: "customers", label: "Customer reviews" },
   { id: "prompts", label: "Prompts" },
   { id: "responses", label: "AI answers" },
   { id: "costs", label: "Costs & limits" },
@@ -33,9 +35,10 @@ const SECTIONS: Array<{ id: Section; label: string }> = [
 
 /**
  * Brand Mentions: what Google AI Mode, AI Overview, ChatGPT and Claude say about the project's brand for a set of
- * prompts - perception, sentiment over time, head-to-head with competitors, attributes, facts and sources.
+ * prompts - perception, sentiment over time, head-to-head with competitors, attributes, facts and sources - next to
+ * what customers say in the brand's Google Maps and Tripadvisor reviews.
  */
-export function BrandMentionsView({ projectId, onOpenSettings }: { projectId: string; onOpenSettings: () => void }) {
+export function BrandMentionsView({ projectId, onOpenSettings, onRunFinished }: { projectId: string; onOpenSettings: () => void; onRunFinished?: () => void }) {
   const [section, setSection] = useState<Section>(() => (SECTIONS.some((s) => s.id === readParam("bm")) ? (readParam("bm") as Section) : "dashboard"));
   const [range, setRange] = useState<Range>("90");
   const [platform, setPlatform] = useState<Platform | "all">("all");
@@ -157,6 +160,7 @@ export function BrandMentionsView({ projectId, onOpenSettings }: { projectId: st
       setRunMessage(err instanceof Error ? err.message : "Run failed");
     } finally {
       setRunning(false);
+      onRunFinished?.();
     }
   }
 
@@ -249,6 +253,8 @@ export function BrandMentionsView({ projectId, onOpenSettings }: { projectId: st
             </button>
           }
         />
+      ) : section === "customers" ? (
+        <CustomersSection projectId={projectId} brandName={brandName} />
       ) : section === "prompts" ? (
         <PromptsPanel projectId={projectId} prompts={prompts} max={maxPrompts} brandName={brandName} onChange={setPrompts} mentionRate={mentionRate} />
       ) : section === "responses" ? (
@@ -314,6 +320,7 @@ export function BrandMentionsView({ projectId, onOpenSettings }: { projectId: st
             </span>
           </div>
           <PerceptionCard data={d} brandName={brandName} platform={platform} />
+          <AiVsCustomersCard projectId={projectId} aiScore={d.perception.score} hasRuns={data.allCycles.some((c) => c.done > 0)} onOpenSection={() => setSection("customers")} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <SentimentTrend trend={d.trend} />
             <HeadToHead brands={d.brands} websites={Object.fromEntries([[brandName, data.brand.website], ...data.competitors.map((c) => [c.name, c.website])])} />

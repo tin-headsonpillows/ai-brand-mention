@@ -3,6 +3,7 @@ import type { TrackingConfig } from "../tracking/types";
 import { analyzeResponse, ANALYSIS_MODEL, summarizePerception } from "./analyze";
 import { CHATGPT_MODELS, CLAUDE_MODELS, analysisCost, typicalAnswerCost } from "./pricing";
 import { askAiMode, askAiOverview, askChatGpt, askClaude, mockAnswer, platformMock, type Answer } from "./providers";
+import { refreshBrandListings, updateCustomerGap } from "./gap";
 import { BudgetExceeded, ensureBudget, recordSpend } from "./spend";
 import { listCycles, readCycle, readPrompts, readSettings, updateCycleSummary, writeCycle, writeCycles } from "./store";
 import { PLATFORMS, PLATFORM_LABEL, type BrandResponse, type BrandSettings, type Cycle, type CycleSummary, type Platform } from "./types";
@@ -197,6 +198,10 @@ export async function runBrandProject(
       stoppedBy = "budget";
       budgetMessage = err.message;
     }
+    if (!stoppedBy) {
+      // AI answers vs what customers say in the brand's reviews; optional, so a failure never holds up the run.
+      await updateCustomerGap(projectId, config, settings, working).catch(() => {});
+    }
   }
   const status: CycleSummary["status"] = finished && !stoppedBy ? "done" : stoppedBy === "budget" ? "paused-budget" : "running";
   summary =
@@ -238,6 +243,12 @@ export async function runScheduled(): Promise<Array<{ projectId: string } & RunO
     });
     results.push({ projectId, ...outcome });
     if (outcome.stoppedBy === "budget") break;
+  }
+  // Leftover time: check the brand's review listings (Google Maps / Tripadvisor) for new reviews, weekly.
+  for (const projectId of await listProjectIds()) {
+    if (deadline - Date.now() < 40_000) break;
+    const [config, settings] = await Promise.all([readConfig(projectId), readSettings(projectId)]);
+    await refreshBrandListings(projectId, config, settings, deadline).catch(() => 0);
   }
   return results;
 }

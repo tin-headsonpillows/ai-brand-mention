@@ -29,16 +29,14 @@ import { RankTrackerView } from "./RankTrackerView";
 import { ResponsesView } from "./ResponsesView";
 import { SettingsView } from "./SettingsView";
 import { EmptyState, IconCalendar, IconLayers, SelectControl } from "./ui";
-import { BrandMentionsView } from "@/components/brand/BrandMentionsView";
 
-type View = "overview" | "rank" | "mentions" | "responses" | "brand" | "settings";
+type View = "overview" | "rank" | "mentions" | "responses" | "settings";
 
 const VIEWS: Array<{ id: View; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "rank", label: "Rank tracker" },
   { id: "mentions", label: "Mentions & Citations" },
   { id: "responses", label: "AI responses" },
-  { id: "brand", label: "Brand Mentions" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -51,7 +49,6 @@ const VIEW_SLUG: Record<View, string> = {
   rank: "rank-tracker",
   mentions: "mentions",
   responses: "ai-responses",
-  brand: "brand-mentions",
   settings: "settings",
 };
 const VIEW_BY_SLUG: Record<string, View> = Object.fromEntries(Object.entries(VIEW_SLUG).map(([v, slug]) => [slug, v as View]));
@@ -137,7 +134,7 @@ export function TrackingTab() {
   const urlProject = useRef(searchParams.get("project"));
 
   useEffect(() => {
-    writeParams({ project: projectId ?? undefined, view: VIEW_SLUG[view], range: view === "brand" ? null : range, ...(view === "brand" ? {} : { bm: null }) });
+    writeParams({ project: projectId ?? undefined, view: VIEW_SLUG[view], range });
   }, [projectId, view, range]);
 
   useEffect(() => {
@@ -394,7 +391,7 @@ export function TrackingTab() {
         ))}
       </nav>
 
-      {view !== "settings" && view !== "brand" ? (
+      {view !== "settings" ? (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -425,9 +422,7 @@ export function TrackingTab() {
         </div>
       ) : null}
 
-      {view === "brand" && projectId ? (
-        <BrandMentionsView key={projectId} projectId={projectId} onOpenSettings={() => setView("settings")} />
-      ) : view === "settings" ? (
+      {view === "settings" ? (
         <SettingsView
           config={config}
           onDraftChange={setConfig}

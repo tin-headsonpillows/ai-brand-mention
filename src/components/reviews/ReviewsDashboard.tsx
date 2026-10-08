@@ -20,6 +20,7 @@ import {
 import { Delta, EmptyState, Headline, Panel, Segmented } from "@/components/tracking/ui";
 import { SentimentHeatmap, type HeatmapSelection } from "./SentimentHeatmap";
 import { ReviewList, SENTIMENT_COLOR, SENTIMENT_LABEL } from "./ReviewList";
+import { TripadvisorProfilePanel, TripTypePanel } from "./TripadvisorPanel";
 
 const pct = (v: number | null) => (v === null ? "–" : `${Math.round(v * 100)}%`);
 const pts = (v: number) => `${Math.round(v * 100)} pts`;
@@ -222,7 +223,7 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
       if (!match) return false;
     }
     if (sentimentFilter !== "all" && r.analysis?.sentiment !== sentimentFilter) return false;
-    if (term && !`${r.text} ${r.textEn ?? ""} ${r.author}`.toLowerCase().includes(term)) return false;
+    if (term && !`${r.title ?? ""} ${r.text} ${r.textEn ?? ""} ${r.author}`.toLowerCase().includes(term)) return false;
     return true;
   });
 
@@ -304,6 +305,8 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
         />
       </section>
 
+      {doc.tripadvisor ? <TripadvisorProfilePanel profile={doc.tripadvisor} /> : null}
+
       {current.length === 0 ? (
         <EmptyState title="No reviews in this period" body="Pick a longer time range, or refresh to check for new reviews." />
       ) : (
@@ -352,6 +355,8 @@ export function ReviewsDashboard({ doc }: { doc: PlaceDoc }) {
               <PointsList rows={rows} sentiment="negative" totalReviews={k.count} onSelect={select} />
             </Panel>
           </div>
+
+          <TripTypePanel reviews={current} />
         </>
       )}
 

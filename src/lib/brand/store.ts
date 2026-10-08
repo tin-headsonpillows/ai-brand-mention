@@ -1,6 +1,6 @@
 import { readJson, writeJson, deleteJson } from "../blobJson";
 import { DEFAULT_CHATGPT_MODEL, DEFAULT_CLAUDE_MODEL } from "./pricing";
-import type { BrandPrompt, BrandSettings, Cycle, CycleSummary, FactVerdict } from "./types";
+import type { BrandPrompt, BrandSettings, CustomerGap, Cycle, CycleSummary, FactVerdict } from "./types";
 
 /** Per project: prompts, settings, a list of tracking cycles and one file per cycle with every answer. */
 const base = (projectId: string) => `brand/${projectId}`;
@@ -9,6 +9,7 @@ const settingsPath = (p: string) => `${base(p)}/settings.json`;
 const cyclesPath = (p: string) => `${base(p)}/cycles.json`;
 const cyclePath = (p: string, id: string) => `${base(p)}/cycles/${id}.json`;
 const factsPath = (p: string) => `${base(p)}/facts.json`;
+const gapPath = (p: string) => `${base(p)}/customer-gap.json`;
 
 export const MAX_PROMPTS = 200;
 
@@ -18,6 +19,7 @@ export function defaultSettings(): BrandSettings {
     chatgptModel: DEFAULT_CHATGPT_MODEL,
     claudeModel: DEFAULT_CLAUDE_MODEL,
     schedule: "weekly",
+    refreshReviews: true,
   };
 }
 
@@ -91,4 +93,12 @@ export function factKey(text: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .slice(0, 120);
+}
+
+export async function readCustomerGap(projectId: string): Promise<CustomerGap | null> {
+  return readJson<CustomerGap>(gapPath(projectId));
+}
+
+export async function writeCustomerGap(projectId: string, gap: CustomerGap): Promise<void> {
+  await writeJson(gapPath(projectId), gap);
 }

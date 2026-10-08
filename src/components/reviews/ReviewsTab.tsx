@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import type { PlaceDoc, PlaceSummary, SyncEvent } from "@/lib/reviews/types";
+import { SOURCE_LABEL, type PlaceDoc, type PlaceSummary, type SyncEvent } from "@/lib/reviews/types";
 import type { ProjectSummary, SerpUsage } from "@/lib/tracking/types";
 import { SerpUsageBadge } from "@/components/SerpUsageBadge";
 import { writeParams } from "@/lib/urlState";
@@ -71,7 +71,7 @@ function needsFetch(doc: PlaceDoc): boolean {
  */
 function remainingCredits(doc: PlaceDoc): number {
   if (!needsFetch(doc)) return 0;
-  const perPage = doc.place.source === "maps" ? 20 : 10;
+  const perPage = doc.place.source === "hotels" ? 10 : 20;
   const target = fetchTarget(doc) ?? doc.settings.maxReviews;
   const missingPages = Math.ceil(Math.max(0, target - doc.reviews.length) / perPage);
   const version = doc.fetch.version ?? 1;
@@ -271,8 +271,8 @@ export function ReviewsTab() {
             Google Maps Reviews
           </h2>
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            Pull a business&apos;s Google reviews, see how sentiment moves over time, and find exactly what customers praise
-            and criticise.
+            Pull a business&apos;s Google Maps and Tripadvisor reviews, see how sentiment moves over time, and find exactly what
+            customers praise and criticise.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -290,7 +290,7 @@ export function ReviewsTab() {
           {places && places.length > 0 && selectedId ? (
             <SelectControl
               value={selectedId}
-              options={places.map((p) => ({ value: p.id, label: p.name }))}
+              options={places.map((p) => ({ value: p.id, label: `${p.name} · ${SOURCE_LABEL[p.source]}` }))}
               onChange={(id) => {
                 setSelectedId(id);
                 store(id);
@@ -324,7 +324,7 @@ export function ReviewsTab() {
       ) : places.length === 0 ? (
         <EmptyState
           title="No businesses yet"
-          body="Add a business from Google Maps (or a hotel from Google Hotels) to fetch its reviews and analyse sentiment."
+          body="Add a business from Google Maps or Tripadvisor (or a hotel from Google Hotels) to fetch its reviews and analyse sentiment."
           action={
             <button type="button" onClick={() => setAdding(true)} className="mt-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: "var(--series-1)" }}>
               + Add business
@@ -339,7 +339,7 @@ export function ReviewsTab() {
               style={{ borderColor: "var(--border-hairline)", background: "var(--surface-1)" }}
             >
               {doc.place.thumbnail ? (
-                // eslint-disable-next-line @next/next/no-img-element -- Google-hosted thumbnail
+                // eslint-disable-next-line @next/next/no-img-element -- Google/Tripadvisor-hosted thumbnail
                 <img src={doc.place.thumbnail} alt="" className="h-16 w-16 rounded-lg object-cover" />
               ) : null}
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -348,15 +348,20 @@ export function ReviewsTab() {
                     {doc.place.name}
                   </span>
                   <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "var(--gridline)", color: "var(--text-secondary)" }}>
-                    {doc.place.source === "maps" ? "Google Maps" : "Google Hotels"}
+                    {SOURCE_LABEL[doc.place.source]}
                   </span>
+                  {doc.tripadvisor?.ranking ? (
+                    <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                      {doc.tripadvisor.ranking}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="truncate text-xs" style={{ color: "var(--text-muted)" }}>
                   {[doc.place.type, doc.place.address].filter(Boolean).join(" · ")}
                 </span>
                 <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  {doc.place.rating ? `${doc.place.rating.toFixed(1)} ★ on Google` : ""}
-                  {doc.place.reviewCount ? ` · ${doc.place.reviewCount.toLocaleString()} reviews on Google` : ""}
+                  {doc.place.rating ? `${doc.place.rating.toFixed(1)} ★ on ${doc.place.source === "tripadvisor" ? "Tripadvisor" : "Google"}` : ""}
+                  {doc.place.reviewCount ? ` · ${doc.place.reviewCount.toLocaleString()} reviews on ${doc.place.source === "tripadvisor" ? "Tripadvisor" : "Google"}` : ""}
                   {` · ${doc.reviews.length.toLocaleString()} saved`}
                   {doc.place.reviewCount && doc.settings.monthsBack === 0
                     ? ` (${Math.min(100, Math.round((doc.reviews.length / doc.place.reviewCount) * 100))}%)`
