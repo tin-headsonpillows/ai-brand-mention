@@ -17,3 +17,9 @@ export function writeParams(updates: Record<string, string | null | undefined>):
     window.history.replaceState(window.history.state, "", next);
   }
 }
+
+/** Reads one query parameter from the current URL (client only). */
+export function readParam(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get(key);
+}

@@ -3,6 +3,10 @@
     {
       "path": "/api/tracking/run",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/brand/run",
+      "schedule": "30 4 * * *"
     }
   ]
 }

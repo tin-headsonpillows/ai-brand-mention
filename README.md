@@ -61,6 +61,27 @@ stay under the function time limit. Without a server OpenAI key the analysis
 falls back to a keyword method. Without SerpApi keys the reviews are
 simulated.
 
+## Brand Mentions (Google Search Tracking -> Brand Mentions)
+
+Tracks how AI answer engines talk about the project's brand for a set of prompts (questions people ask AI):
+
+- **Prompts**: type them, upload a CSV/TSV/TXT (a `prompt`/`query`/`question` column and an optional `topic`
+  column are recognised), or let ChatGPT suggest branded and unbranded questions from the brand, competitors and
+  tracked keywords. Prompts naming the brand are tagged branded automatically.
+- **Sources**: Google AI Mode and AI Overview (SerpApi, ~3 credits per prompt), ChatGPT (OpenAI Responses API
+  with web search, `gpt-5.4-mini` by default) and Claude (Anthropic Messages API with web search,
+  `claude-opus-5-5` by default, with server-side refusal fallback). Models are chosen per project.
+- **Analysis**: each answer is read by `OPENAI_MODEL` for brand mentions and position, sentiment (0-100), the
+  brands and attributes discussed, and the claims made about the brand (fact or opinion, with the source used).
+- **Dashboard**: perception score and narrative (strengths / weaknesses), sentiment trend per run, head-to-head
+  against competitors (project + auto-detected), attributes (leading / at parity / behind), brand facts to mark
+  correct or incorrect, source sentiment with a claims table, and every full answer with its sources. Filters:
+  date range, platform, branded / unbranded, topic.
+- **Schedule & cost control**: runs weekly (daily cron `/api/brand/run` starts due runs and continues unfinished
+  ones) plus Run now. A daily spending limit (default $5, shared by all projects, editable in Costs & limits)
+  pauses runs when reached; they continue the next day. Costs & limits shows today's spend and projected cost per
+  run / week / month for each model.
+
 ## Images tab
 
 Find, crop and download images as JPG:
@@ -160,6 +181,7 @@ deployer's:
 | `OPENAI_IMAGE_MODEL` | No | `gpt-image-2.5-flare` | Default model in the Images tab's generator until a viewer picks another (must be one listed in `src/lib/images/models.ts`; your OpenAI organisation may need to be verified to use GPT Image models). |
 | `BLOB_READ_WRITE_TOKEN` | For tracking & reviews | - | Vercel Blob store that holds tracking history and fetched reviews. |
 | `LOCAL_BLOB_DIR` | No | - | Local development only: store those JSON documents in this folder instead of Vercel Blob. |
+| `ANTHROPIC_API_KEY` | For Claude in Brand Mentions | - | Claude API key (console.anthropic.com). Without it, Claude answers are placeholders. |
 | `APP_SECRET` | For the Articles tab | - | Long random string that encrypts Google sign-in cookies and stored WordPress application passwords. Changing it signs everyone out and requires re-entering WordPress passwords. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google sign-in | - | OAuth "Web application" client with the Sheets and Docs APIs enabled. Redirect URI: `https://<your-domain>/api/google/callback`. Without them, only link-shared Sheets/Docs can be imported. |
 

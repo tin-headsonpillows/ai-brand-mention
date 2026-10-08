@@ -28,7 +28,7 @@ interface RawReference {
   source?: unknown;
 }
 
-function flattenTextBlocks(blocks: RawTextBlock[] | undefined): string {
+export function flattenTextBlocks(blocks: RawTextBlock[] | undefined): string {
   if (!Array.isArray(blocks)) return "";
   const lines: string[] = [];
   for (const block of blocks) {
@@ -43,7 +43,7 @@ function flattenTextBlocks(blocks: RawTextBlock[] | undefined): string {
   return lines.join("\n");
 }
 
-function mapReferences(refs: RawReference[] | undefined): SourceRef[] {
+export function mapReferences(refs: RawReference[] | undefined): SourceRef[] {
   if (!Array.isArray(refs)) return [];
   return refs
     .map((r) => ({
