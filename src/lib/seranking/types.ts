@@ -115,14 +115,126 @@ export interface SeCompetitor {
   domainTrust: number | null;
 }
 
-/** A domain ranking in the TOP 10 for the project's keywords, with its share of visibility. */
-export interface SeSerpDomain {
+/** One day of a site's rankings across the tracked keywords on one search engine. */
+export interface SeRankDay {
+  date: string;
+  top3: number;
+  top10: number;
+  /** Keywords in the top 100. */
+  ranked: number;
+  /** Mean position over all tracked keywords, counting a keyword that isn't in the top 100 as 100 (as SE Ranking does). */
+  avgPos: number | null;
+}
+
+/** A domain competing in the top 10 of the project's keywords on the main search engine. */
+export interface SeRivalDomain {
   domain: string;
+  isOwn: boolean;
+  /** Its SE Ranking competitor ID when it's tracked as a competitor in the project. */
+  competitorId: number | null;
+  /** SE Ranking visibility % at the latest check, and at the comparison check about a week earlier. */
   visibility: number;
+  visibilityPrev: number | null;
+  /** Counted from the top 10 of each keyword at the latest check. */
+  top3: number;
+  top10: number;
+  /** Mean position of its top-10 results. */
+  avgPos: number | null;
+  /** Search volume of the keywords it's in the top 10 for. */
+  volume: number;
   backlinks: number | null;
   refDomains: number | null;
-  isOwn: boolean;
-  isCompetitor: boolean;
+}
+
+export interface SeSerpResult {
+  pos: number;
+  domain: string;
+  url: string;
+}
+
+/** Who competes for the project's keywords: every domain in the top 10, from SE Ranking's daily checks. */
+export interface SeCompetition {
+  engineId: number;
+  engineName: string;
+  date: string;
+  prevDate: string | null;
+  /** Keywords whose top 10 was read (by search volume, up to MAX_SERP_KEYWORDS). */
+  keywordCount: number;
+  domains: SeRivalDomain[];
+  /** Daily visibility % (SE Ranking keeps 14 days), for the site, its tracked competitors and the leading domains. */
+  visibilityTrend: Array<{ date: string; values: Record<string, number> }>;
+  /** The top 10 per keyword ID at the latest check. */
+  serps: Record<string, SeSerpResult[]>;
+}
+
+/** A competitor tracked in the SE Ranking project, with its positions for the project's keywords. */
+export interface SeRival {
+  id: number;
+  name: string;
+  domain: string;
+  domainTrust: number | null;
+  /** Latest position per `${engineId}:${keywordId}`, and the position 7 days before it; 0 = not in the top 100. */
+  latest: Record<string, number>;
+  prev7: Record<string, number>;
+  /** Daily totals per search engine ID, last 30 days. */
+  trend: Record<string, SeRankDay[]>;
+}
+
+/** The backlink profile costs API credits (about this many per refresh), so it refreshes weekly unless asked. */
+export const LINK_PROFILE_CREDITS = 750;
+export const LINK_PROFILE_MAX_AGE_MS = 7 * 86_400_000;
+
+/** Referring domain gained or lost recently. */
+export interface SeLinkDomain {
+  domain: string;
+  date: string;
+  backlinks: number;
+  dofollow: number | null;
+  dt: number | null;
+}
+
+/**
+ * The site's backlink profile from SE Ranking's backlink index (Data API - the same data as SE Ranking's Backlink
+ * Checker). Each refresh costs API credits, so it's refreshed weekly rather than with every daily sync.
+ */
+export interface SeLinkProfile {
+  fetchedAt: string;
+  target: string;
+  mode: "domain" | "host";
+  /** Domain Trust and Page Trust (SE Ranking's Domain InLink Rank / InLink Rank), 0-100. */
+  domainTrust: number | null;
+  pageTrust: number | null;
+  backlinks: number;
+  refDomains: number;
+  dofollow: number;
+  nofollow: number;
+  dofollowRefDomains: number | null;
+  ips: number | null;
+  subnets: number | null;
+  textBacklinks: number | null;
+  fromHomePages: number | null;
+  edu: number | null;
+  gov: number | null;
+  anchorCount: number | null;
+  pagesWithBacklinks: number | null;
+  new30: { backlinks: number; refDomains: number };
+  lost30: { backlinks: number; refDomains: number };
+  /** Last 90 days, oldest first: live backlinks, and backlinks / referring domains found and lost that day. */
+  daily: Array<{ date: string; total: number | null; newLinks: number; lostLinks: number; newDomains: number; lostDomains: number }>;
+  /** Weekly Domain Trust and home-page Page Trust, last 6 months. */
+  trust: Array<{ date: string; dt: number | null; pt: number | null }>;
+  anchors: Array<{ anchor: string; backlinks: number; refDomains: number; dofollow: number | null; firstSeen: string | null }>;
+  /** Referring domains per Domain Trust band: 0-9, 10-19, ... 90-100. */
+  dtBands: number[];
+  countries: Array<{ code: string; count: number }>;
+  tlds: Array<{ tld: string; count: number }>;
+  topPages: Array<{ url: string; backlinks: number | null; refDomains: number | null }>;
+  newDomains: SeLinkDomain[];
+  lostDomains: SeLinkDomain[];
+  /** The site and its tracked competitors side by side. */
+  compare: Array<{ domain: string; isOwn: boolean; backlinks: number | null; refDomains: number | null; dofollow: number | null; domainTrust: number | null }>;
+  /** Parts of the backlink data SE Ranking didn't return. */
+  errors: Record<string, string>;
 }
 
 export const LLM_LABEL: Record<string, string> = {
@@ -210,7 +322,20 @@ export interface SeVisible {
   prompts: Array<{ text: string; visibility: number | null; shareOfVoice: number | null; avgPosition: number | null; sentiment: number | null; mentions: number | null; topBrands: string[] }>;
 }
 
-export type SeSection = "summary" | "engines" | "history" | "keywords" | "competitors" | "serp" | "audit" | "backlinks" | "ai" | "aiSources" | "visible";
+export type SeSection =
+  | "summary"
+  | "engines"
+  | "history"
+  | "keywords"
+  | "competitors"
+  | "competition"
+  | "rivals"
+  | "audit"
+  | "backlinks"
+  | "linkProfile"
+  | "ai"
+  | "aiSources"
+  | "visible";
 
 export interface SeSnapshot {
   version: 1;
@@ -228,9 +353,12 @@ export interface SeSnapshot {
   history: Partial<Record<HistoryMetric, SeSeries[]>>;
   keywords: SeKeyword[];
   competitors: SeCompetitor[];
-  serpDomains: SeSerpDomain[];
+  competition: SeCompetition | null;
+  rivals: SeRival[];
   audit: SeAudit | null;
+  /** Links tracked in SE Ranking's Backlink Monitor (often empty). */
   backlinks: SeBacklinks | null;
+  linkProfile: SeLinkProfile | null;
   ai: SeAi | null;
   visible: SeVisible | null;
 }

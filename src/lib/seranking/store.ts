@@ -84,7 +84,9 @@ export async function resolveSite(projectId: string, sites?: SeSite[]): Promise<
 }
 
 export async function readSnapshot(projectId: string): Promise<SeSnapshot | null> {
-  return readJson<SeSnapshot>(snapshotPath(projectId));
+  const snap = await readJson<SeSnapshot>(snapshotPath(projectId));
+  // Snapshots synced before competitors and backlinks had their own sections lack these parts.
+  return snap ? { ...snap, competition: snap.competition ?? null, rivals: snap.rivals ?? [], linkProfile: snap.linkProfile ?? null } : null;
 }
 
 export async function writeSnapshot(projectId: string, snapshot: SeSnapshot): Promise<void> {

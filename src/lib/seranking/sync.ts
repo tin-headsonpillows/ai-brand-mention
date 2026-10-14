@@ -1,6 +1,9 @@
+import { fetchLinkProfile } from "./backlinks";
 import { asList, hostOf, isSeRankingMock, num, seGet, str } from "./client";
+import { MAX_SERP_KEYWORDS, buildCompetition, buildRival, type VisibilityDay } from "./competition";
 import { mockSnapshot } from "./mock";
 import {
+  LINK_PROFILE_MAX_AGE_MS,
   LLM_LABEL,
   type HistoryMetric,
   type SeAi,
@@ -10,11 +13,14 @@ import {
   type SeAudit,
   type SeAuditIssue,
   type SeBacklinks,
+  type SeCompetition,
   type SeCompetitor,
   type SeEngine,
   type SeKeyword,
+  type SeLinkProfile,
+  type SeRival,
   type SeSection,
-  type SeSerpDomain,
+  type SeSerpResult,
   type SeSeries,
   type SeSite,
   type SeSnapshot,
@@ -30,6 +36,9 @@ const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10);
 const HISTORY_DAYS = 180;
 const KEYWORD_DAYS = 30;
 const MAX_LLM_ENGINES = 10;
+const MAX_RIVALS = 10;
+/** SE Ranking keeps the daily list of top-10 domains for 14 days. */
+const VISIBILITY_DAYS = 14;
 
 // --- Rank tracking -------------------------------------------------------------------------------------------
 
@@ -142,24 +151,73 @@ async function fetchCompetitors(siteId: number): Promise<SeCompetitor[]> {
     .filter((c) => c.name);
 }
 
-/** Domains in the TOP 10 for the project's keywords on the latest check (history is kept for 14 days only). */
-async function fetchSerpDomains(siteId: number, engineId: number, date: string, siteHost: string, competitors: SeCompetitor[]): Promise<SeSerpDomain[]> {
-  const competitorHosts = competitors.map((c) => hostOf(c.url || c.name));
-  return asList(await seGet("project-management/competitors/metrics", { site_id: siteId, site_engine_id: engineId, date }))
-    .map((d) => {
-      const domain = (str(d.domain) ?? "").replace(/^www\./, "");
-      return {
-        domain,
-        visibility: num(d.visibility) ?? 0,
-        backlinks: num(d.backlinks),
-        refDomains: num(d.domains),
-        isOwn: domain === siteHost || domain.endsWith(`.${siteHost}`),
-        isCompetitor: competitorHosts.some((h) => h && (domain === h || domain.endsWith(`.${h}`))),
-      };
+/** Every domain in the top 10 of the project's keywords on the main engine: 14 days of visibility, plus each keyword's top 10. */
+async function fetchCompetition(siteId: number, engine: SeEngine, date: string, keywords: SeKeyword[], siteHost: string, competitors: SeCompetitor[]): Promise<SeCompetition> {
+  const visibilityDay = async (day: string): Promise<VisibilityDay> => ({
+    date: day,
+    rows: asList(await seGet("project-management/competitors/metrics", { site_id: siteId, site_engine_id: engine.id, date: day })).map((d) => ({
+      domain: str(d.domain) ?? "",
+      visibility: num(d.visibility) ?? 0,
+      backlinks: num(d.backlinks),
+      refDomains: num(d.domains),
+    })),
+  });
+  const earlier = Array.from({ length: VISIBILITY_DAYS - 1 }, (_, i) => isoDay(Date.parse(date) - (VISIBILITY_DAYS - 1 - i) * DAY_MS));
+  const top = keywords
+    .filter((k) => k.engineId === engine.id)
+    .sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))
+    .slice(0, MAX_SERP_KEYWORDS);
+  let failed = 0;
+  let lastError: unknown = null;
+  const serps: Record<string, SeSerpResult[]> = {};
+  const readSerp = async (k: SeKeyword) => {
+    try {
+      const rows = asList(await seGet("project-management/competitors/serp10", { site_id: siteId, site_engine_id: engine.id, keyword_id: k.id, date }));
+      serps[k.id] = rows
+        .map((r) => ({ pos: num(r.position) ?? 0, url: str(r.url) ?? "", domain: hostOf(str(r.url) ?? "") }))
+        .filter((r) => r.pos > 0 && r.domain)
+        .sort((a, b) => a.pos - b.pos);
+    } catch (err) {
+      failed++;
+      lastError = err;
+    }
+  };
+  const [days] = await Promise.all([
+    // The latest day must load; an older day SE Ranking no longer has just leaves a gap in the trend.
+    Promise.all([visibilityDay(date), ...earlier.map((d) => visibilityDay(d).catch(() => ({ date: d, rows: [] })))]),
+    Promise.all(top.map(readSerp)),
+  ]);
+  if (top.length > 0 && failed === top.length) throw lastError;
+  return buildCompetition({ engine, days, serps, keywords: top, siteHost, competitors });
+}
+
+/** Tracked competitors' positions for the project's keywords, on every engine, over 30 days. */
+async function fetchRivals(competitors: SeCompetitor[], from: string, to: string, errors: SnapshotErrors): Promise<SeRival[]> {
+  const rivals = await Promise.all(
+    competitors.slice(0, MAX_RIVALS).map(async (c) => {
+      try {
+        const engines = asList(await seGet("project-management/competitors/positions", { competitor_id: c.id, date_from: from, date_to: to }));
+        return buildRival(
+          c,
+          engines.map((e) => ({
+            engineId: num(e.site_engine_id) ?? 0,
+            keywords: asList(e.keywords)
+              .map((k) => ({
+                id: str(k.id) ?? "",
+                positions: asList(k.positions)
+                  .map((p) => ({ date: str(p.date) ?? "", pos: num(p.pos) ?? 0 }))
+                  .filter((p) => p.date),
+              }))
+              .filter((k) => k.id),
+          }))
+        );
+      } catch (err) {
+        errors.rivals = `${c.name}: ${message(err)}`;
+        return null;
+      }
     })
-    .filter((d) => d.domain)
-    .sort((a, b) => b.visibility - a.visibility)
-    .slice(0, 20);
+  );
+  return rivals.filter((r): r is SeRival => r !== null);
 }
 
 // --- Site audit, backlinks --------------------------------------------------------------------------------------
@@ -475,9 +533,29 @@ async function part<T>(errors: SnapshotErrors, section: SeSection, run: () => Pr
   }
 }
 
-/** Pulls everything the dashboard shows for one SE Ranking project into a snapshot (about 20-40 API requests). */
-export async function syncSite(site: SeSite, now = new Date()): Promise<SeSnapshot> {
-  if (isSeRankingMock()) return mockSnapshot(site, now);
+export interface SyncOptions {
+  /** The project's last snapshot: its backlink profile is reused while it's under a week old. */
+  previous?: SeSnapshot | null;
+  /** Refresh the backlink profile even if it's recent (costs SE Ranking API credits). */
+  refreshLinks?: boolean;
+}
+
+/** The backlink profile for a snapshot: the recent one from the last sync, or a fresh one (Data API credits). */
+export async function linkProfileFor(site: SeSite, competitors: SeCompetitor[], now: Date, options: SyncOptions, errors: SnapshotErrors): Promise<SeLinkProfile | null> {
+  const kept = options.previous && options.previous.siteId === site.id ? (options.previous.linkProfile ?? null) : null;
+  if (kept && !options.refreshLinks && now.getTime() - Date.parse(kept.fetchedAt) < LINK_PROFILE_MAX_AGE_MS) return kept;
+  if (isSeRankingMock()) return mockSnapshot(site, now, kept, options.refreshLinks).linkProfile;
+  try {
+    return await fetchLinkProfile(site.url, competitors, now);
+  } catch (err) {
+    errors.linkProfile = message(err);
+    return kept;
+  }
+}
+
+/** Pulls everything the dashboard shows for one SE Ranking project into a snapshot (about 150-200 API requests). */
+export async function syncSite(site: SeSite, now = new Date(), options: SyncOptions = {}): Promise<SeSnapshot> {
+  if (isSeRankingMock()) return mockSnapshot(site, now, options.previous?.siteId === site.id ? options.previous.linkProfile : null, options.refreshLinks);
   const to = isoDay(now.getTime());
   const from30 = isoDay(now.getTime() - KEYWORD_DAYS * DAY_MS);
   const fromHistory = isoDay(now.getTime() - HISTORY_DAYS * DAY_MS);
@@ -504,9 +582,13 @@ export async function syncSite(site: SeSite, now = new Date()): Promise<SeSnapsh
     const named = [...avgPos, ...visibility].find((s) => s.engineId === e.id);
     e.name = named?.name ?? `Search engine ${e.searchEngineId}`;
   }
-  const lastCheck = keywords.flatMap((k) => k.positions.map((p) => p.date)).sort().at(-1);
-  const serpDomains =
-    engines[0] && lastCheck ? await part(errors, "serp", () => fetchSerpDomains(site.id, engines[0].id, lastCheck, siteHost, competitors), [] as SeSerpDomain[]) : [];
+  const main = engines[0];
+  const lastCheck = keywords.filter((k) => k.engineId === main?.id).flatMap((k) => k.positions.map((p) => p.date)).sort().at(-1);
+  const [competition, rivals, linkProfile] = await Promise.all([
+    main && lastCheck ? part(errors, "competition", () => fetchCompetition(site.id, main, lastCheck, keywords, siteHost, competitors), null) : Promise.resolve(null),
+    part(errors, "rivals", () => fetchRivals(competitors, from30, to, errors), [] as SeRival[]),
+    linkProfileFor(site, competitors, now, options, errors),
+  ]);
 
   return {
     version: 1,
@@ -522,9 +604,11 @@ export async function syncSite(site: SeSite, now = new Date()): Promise<SeSnapsh
     history: { avg_pos: avgPos, visibility_percent: visibility, top10 },
     keywords,
     competitors,
-    serpDomains,
+    competition,
+    rivals,
     audit,
     backlinks,
+    linkProfile,
     ai,
     visible,
   };

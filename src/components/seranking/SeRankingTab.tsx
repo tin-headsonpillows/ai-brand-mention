@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/tracking/ui";
 import { ProjectBar, type NewProjectInput } from "@/components/tracking/ProjectBar";
 import { AiSection } from "./AiSection";
 import { AuditSection } from "./AuditSection";
+import { BacklinksSection } from "./BacklinksSection";
 import { CompetitorsSection } from "./CompetitorsSection";
 import { OverviewSection } from "./OverviewSection";
 import { RankingsSection } from "./RankingsSection";
@@ -18,13 +19,14 @@ const PROJECT_STORAGE_KEY = "tracking.project";
 /** SE Ranking re-checks rankings daily; an older snapshot is refreshed when the page opens. */
 const STALE_MS = 12 * 3_600_000;
 
-type Section = "overview" | "rankings" | "audit" | "ai" | "competitors";
+type Section = "overview" | "rankings" | "competitors" | "backlinks" | "audit" | "ai";
 const SECTIONS: Array<{ id: Section; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "rankings", label: "Rankings" },
+  { id: "competitors", label: "Competitors" },
+  { id: "backlinks", label: "Backlinks" },
   { id: "audit", label: "Site audit" },
   { id: "ai", label: "AI prompts" },
-  { id: "competitors", label: "Competitors & backlinks" },
 ];
 
 interface ProjectPayload {
@@ -62,6 +64,7 @@ export function SeRankingTab() {
   const [data, setData] = useState<ProjectPayload | null>(null);
   const [sites, setSites] = useState<SeSite[] | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [refreshingLinks, setRefreshingLinks] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const autoSynced = useRef<string | null>(null);
 
@@ -95,7 +98,7 @@ export function SeRankingTab() {
   const sync = useCallback(
     async (id: string) => {
       setSyncing(true);
-      setMessage("Syncing from SE Ranking - rankings, audit, AI prompts...");
+      setMessage("Syncing from SE Ranking - rankings, competitors, audit, AI prompts... (about a minute)");
       try {
         const res = await fetch(`/api/seranking/sync?project=${encodeURIComponent(id)}`, { method: "POST" });
         const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: Record<string, string> };
@@ -146,6 +149,24 @@ export function SeRankingTab() {
     };
   }, []);
 
+  async function refreshLinks() {
+    if (!projectId) return;
+    setRefreshingLinks(true);
+    setMessage("Refreshing backlink data from SE Ranking...");
+    try {
+      const res = await fetch(`/api/seranking/backlinks?project=${encodeURIComponent(projectId)}`, { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { error?: string | null; partial?: Record<string, string> };
+      if (!res.ok || body.error) throw new Error(body.error ?? `Refresh failed (${res.status})`);
+      const missing = Object.keys(body.partial ?? {});
+      setMessage(missing.length ? `Backlinks refreshed, but SE Ranking didn't return: ${missing.join(", ")}.` : null);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Refresh failed");
+    } finally {
+      await load(projectId);
+      setRefreshingLinks(false);
+    }
+  }
+
   async function changeLink(value: string) {
     if (!projectId) return;
     await fetch("/api/seranking/link", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: projectId, siteId: value === "auto" ? null : Number(value) }) });
@@ -172,7 +193,7 @@ export function SeRankingTab() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-2">
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            Rank tracking, site audit and AI prompt tracking from your SE Ranking account, synced daily
+            Rank tracking, competitors, backlinks, site audit and AI prompt tracking from your SE Ranking account, synced daily
           </p>
           {projects ? (
             <ProjectBar
@@ -286,6 +307,8 @@ export function SeRankingTab() {
             <AuditSection audit={snap.audit} />
           ) : section === "ai" ? (
             <AiSection ai={snap.ai} visible={snap.visible} errors={snap.errors} />
+          ) : section === "backlinks" ? (
+            <BacklinksSection snap={snap} onRefresh={() => void refreshLinks()} refreshing={refreshingLinks || syncing} />
           ) : (
             <CompetitorsSection snap={snap} />
           )}

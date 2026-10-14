@@ -56,7 +56,7 @@ export function BarList({
   format = (v) => fmtInt(v),
   color = "var(--series-1)",
 }: {
-  rows: Array<{ label: ReactNode; value: number; key: string; title?: string }>;
+  rows: Array<{ label: ReactNode; value: number; key: string; title?: string; color?: string }>;
   max?: number;
   format?: (v: number) => string;
   color?: string;
@@ -70,7 +70,7 @@ export function BarList({
             {r.label}
           </span>
           <span className="h-2.5 rounded" style={{ background: "var(--page-plane)" }}>
-            <span className="block h-2.5 rounded" style={{ width: `${Math.max(r.value > 0 ? 1.5 : 0, (r.value / top) * 100)}%`, background: color }} />
+            <span className="block h-2.5 rounded" style={{ width: `${Math.max(r.value > 0 ? 1.5 : 0, (r.value / top) * 100)}%`, background: r.color ?? color }} />
           </span>
           <span className="text-right tabular" style={{ color: "var(--text-primary)" }}>
             {format(r.value)}

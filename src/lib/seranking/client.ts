@@ -121,12 +121,4 @@ export function str(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : typeof v === "number" ? String(v) : null;
 }
 
-/** Host of a URL or bare domain, without www. */
-export function hostOf(url: string): string {
-  const raw = url.trim().toLowerCase();
-  try {
-    return new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname.replace(/^www\./, "");
-  } catch {
-    return raw.replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[/?#]/)[0];
-  }
-}
+export { hostOf } from "./rank";

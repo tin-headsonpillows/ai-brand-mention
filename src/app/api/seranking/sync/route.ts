@@ -27,7 +27,7 @@ async function handle(req: NextRequest) {
       if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
       const { site } = await resolveSite(projectId);
       if (!site) return Response.json({ error: "Link this project to an SE Ranking project first." }, { status: 400 });
-      const snapshot = await syncSite(site);
+      const snapshot = await syncSite(site, new Date(), { previous: await readSnapshot(projectId) });
       await writeSnapshot(projectId, snapshot);
       return Response.json({ ok: true, syncedAt: snapshot.syncedAt, errors: snapshot.errors });
     }
@@ -51,7 +51,7 @@ async function handle(req: NextRequest) {
         continue;
       }
       try {
-        await writeSnapshot(projectId, await syncSite(site));
+        await writeSnapshot(projectId, await syncSite(site, new Date(), { previous: last }));
         results.push({ projectId, siteId: site.id, status: "synced" });
       } catch (err) {
         results.push({ projectId, siteId: site.id, status: `failed: ${err instanceof Error ? err.message : String(err)}` });

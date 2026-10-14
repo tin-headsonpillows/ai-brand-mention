@@ -108,9 +108,10 @@ Search Tracking; old `/google-search-tracking?view=brand-mentions` links redirec
 ## SE Ranking tab
 
 Shows a project's data from the agency's SE Ranking account (one API key, `SERANKING_API_KEY`, for the Project API,
-AI Results Tracker and SE Visible). Each app project is matched to the SE Ranking project tracking the brand's
-website, or you pick one from the list. A daily cron (`/api/seranking/sync`) and the Sync now button pull a snapshot
-(about 20-40 API requests, kept under SE Ranking's 5 requests/second):
+AI Results Tracker, SE Visible and the Data API's backlink index). Each app project is matched to the SE Ranking
+project tracking the brand's website, or you pick one from the list. A daily cron (`/api/seranking/sync`) and the Sync
+now button pull a snapshot (about 150-200 API requests - mostly one top-10 lookup per keyword - kept under SE
+Ranking's 5 requests/second, so a sync takes about a minute):
 
 - **Overview**: average position, visibility, keywords in the top 10, keywords up / down, site health and AI mention
   rate; rankings over 30 / 90 / 180 days per search engine (visibility %, average position, top-10 count); position
@@ -123,8 +124,19 @@ website, or you pick one from the list. A daily cron (`/api/seranking/sync`) and
   Gemini): brand mention and link rates with their 30-day change and trend, every prompt's mention / link position per
   engine, mention opportunities, brands mentioned, the most-cited source domains and recommendations. Projects also
   tracked in SE Visible show its brand metrics and prompts.
-- **Competitors & backlinks**: domains owning the top 10 for the tracked keywords, the project's competitors with
-  Domain Trust, and Backlink Monitor totals.
+- **Competitors**: every domain in the top 10 of the 100 highest-volume keywords (main search engine) with SE
+  Ranking's visibility % and its change over a week, keywords in the top 10 / top 3 and average position; a
+  distribution chart (keywords in the top 10 against average position, bubble = visibility); the site against its
+  tracked competitors over time (visibility for the 14 days SE Ranking keeps, keywords in the top 10 and average
+  position over 30 days); and a keyword head-to-head of positions against each tracked competitor (or the top result
+  when none are tracked), filterable to where the site leads, trails or doesn't rank.
+- **Backlinks**: SE Ranking's backlink index (the Backlink Checker data) - Domain Trust and Page Trust, referring
+  domains and backlinks with new / lost in the last 30 days, link types, total backlinks over 3 months, Domain / Page
+  Trust over 6 months, new & lost referring domains and backlinks per week or day, top anchors, referring domains by
+  Domain Trust band, countries, referring domains won and lost, most linked pages, and the site against its tracked
+  competitors. These Data API calls cost API credits (about 750 per refresh), so the backlink data refreshes once a
+  week with the daily sync, or on demand with Refresh backlinks (`POST /api/seranking/backlinks`). Backlink Monitor
+  totals show when the project uses it.
 
 Without the key the tab shows generated data. Sections SE Ranking refuses (for example, no AI Results Tracker
 add-on) show the API's message and the rest still loads.

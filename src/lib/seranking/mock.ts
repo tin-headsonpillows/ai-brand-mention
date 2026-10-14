@@ -1,5 +1,7 @@
+import { linkTarget } from "./backlinks";
 import { hostOf } from "./client";
-import type { SeAiEngine, SeAiPrompt, SeKeyword, SeSeries, SeSite, SeSnapshot } from "./types";
+import { buildCompetition, buildRival, type VisibilityDay } from "./competition";
+import { LINK_PROFILE_MAX_AGE_MS, type SeAiEngine, type SeAiPrompt, type SeCompetitor, type SeEngine, type SeKeyword, type SeLinkProfile, type SeRival, type SeSerpResult, type SeSeries, type SeSite, type SeSnapshot } from "./types";
 
 /** Generated SE Ranking data (no API key configured), deterministic per project so reloads look the same. */
 
@@ -52,7 +54,176 @@ const PROMPTS = [
   "halong bay cruise reviews 2026",
 ] as const;
 
-export function mockSnapshot(site: SeSite, now: Date): SeSnapshot {
+/** Relative click share by position 1-10, to turn generated top-10s into visibility. */
+const CTR = [1, 0.57, 0.4, 0.3, 0.23, 0.18, 0.14, 0.12, 0.1, 0.09];
+
+const OTHER_DOMAINS: Array<[string, number, number, number]> = [
+  // domain, how often it takes a top-10 slot, backlinks, referring domains
+  ["tripadvisor.com", 0.95, 103_000_000, 527_000],
+  ["booking.com", 0.55, 583_000_000, 1_379_000],
+  ["vietnam.travel", 0.45, 120_000, 9_800],
+  ["viator.com", 0.4, 71_000_000, 79_800],
+  ["getyourguide.com", 0.35, 32_800_000, 85_900],
+  ["klook.com", 0.35, 19_200_000, 177_000],
+  ["halongbaycruises.com", 0.3, 1_976, 505],
+  ["bestpricetravel.com", 0.3, 14_500, 1_994],
+  ["lonelyplanet.com", 0.2, 9_400_000, 160_000],
+  ["reddit.com", 0.2, 2_372_000_000, 2_532_000],
+];
+
+/** Tracked competitors' positions, every keyword's top 10 and 14 days of visibility, consistent with the site's own rankings. */
+function mockCompetition(r: () => number, host: string, engines: SeEngine[], keywords: SeKeyword[], competitors: SeCompetitor[], today: number) {
+  const strengths = [0.6, 0.35, 0.75, 0.25, 0.5, 0.4];
+  const rivals: SeRival[] = competitors.map((c, ci) => {
+    const strength = strengths[ci % strengths.length];
+    return buildRival(
+      c,
+      engines.map((engine) => ({
+        engineId: engine.id,
+        keywords: keywords
+          .filter((k) => k.engineId === engine.id)
+          .map((k) => {
+            const base = r() < strength + 0.2 ? Math.max(1, Math.round(1 + r() * 40 * (1.1 - strength))) : 100;
+            const slope = ci % 2 ? 0.06 : -0.05;
+            return {
+              id: k.id,
+              positions: k.positions.map((p, d) => ({
+                date: p.date,
+                pos: base >= 100 ? 100 : Math.min(100, Math.max(1, Math.round(base + (30 - d) * slope + (r() - 0.5) * 2.5))),
+              })),
+            };
+          }),
+      }))
+    );
+  });
+
+  const main = engines[0];
+  const mainKeywords = keywords.filter((k) => k.engineId === main.id);
+  const serps: Record<string, SeSerpResult[]> = {};
+  for (const k of mainKeywords) {
+    const slots: Array<string | null> = Array.from({ length: 10 }, () => null);
+    const claims = [
+      ...(k.current && k.current <= 10 ? [{ domain: host, pos: k.current }] : []),
+      ...rivals.map((rv) => ({ domain: rv.domain, pos: rv.latest[`${main.id}:${k.id}`] ?? 0 })).filter((c) => c.pos > 0 && c.pos <= 10),
+    ].sort((a, b) => a.pos - b.pos);
+    for (const c of claims) {
+      let i = c.pos - 1;
+      while (i < 10 && slots[i]) i++;
+      if (i < 10) slots[i] = c.domain;
+    }
+    for (let i = 0; i < 10; i++) {
+      if (slots[i]) continue;
+      const pool = OTHER_DOMAINS.filter(([d]) => !slots.includes(d));
+      const pick = pool.find(([, weight]) => r() < weight) ?? pool[0];
+      slots[i] = pick ? pick[0] : `example-${i}.com`;
+    }
+    serps[k.id] = slots.map((domain, i) => ({ pos: i + 1, domain: domain as string, url: `https://www.${domain}/${k.name.replace(/\s+/g, "-")}` }));
+  }
+
+  const totalVolume = mainKeywords.reduce((n, k) => n + (k.volume ?? 0), 0) || 1;
+  const share = new Map<string, number>();
+  for (const k of mainKeywords) for (const res of serps[k.id]) share.set(res.domain, (share.get(res.domain) ?? 0) + ((k.volume ?? 0) * CTR[res.pos - 1]) / totalVolume);
+  const links = new Map<string, [number, number]>([...OTHER_DOMAINS.map(([d, , b, rd]) => [d, [b, rd]] as [string, [number, number]]), [host, [3_107, 961]]]);
+  competitors.forEach((c, i) => links.set(hostOf(c.url), [1_200 + i * 2_300, 120 + i * 140]));
+  const slopes = new Map([...share.keys()].map((d) => [d, d === host ? 0.012 : (r() - 0.5) * 0.03]));
+  const days: VisibilityDay[] = Array.from({ length: 14 }, (_, i) => ({
+    date: day(today - (13 - i) * DAY),
+    rows: [...share.entries()].map(([domain, v]) => ({
+      domain: domain === "tripadvisor.com" || domain === "booking.com" ? `www.${domain}` : domain,
+      visibility: Math.max(0, Math.round(v * 100 * (1 + (i - 13) * (slopes.get(domain) ?? 0) + (r() - 0.5) * 0.06) * 100) / 100),
+      backlinks: links.get(domain)?.[0] ?? null,
+      refDomains: links.get(domain)?.[1] ?? null,
+    })),
+  }));
+  return { rivals, competition: buildCompetition({ engine: main, days, serps, keywords: mainKeywords, siteHost: host, competitors }) };
+}
+
+const siteHost = (site: SeSite) => hostOf(site.url);
+
+function mockLinkProfile(r: () => number, site: SeSite, competitors: SeCompetitor[], now: Date): SeLinkProfile {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const { target, mode } = linkTarget(site.url);
+  let total = 3_560;
+  const daily = Array.from({ length: 90 }, (_, i) => {
+    const spikeLost = i === 17 ? 310 : i === 52 ? 120 : 0;
+    const newLinks = Math.round(r() * 9 + (i % 23 === 5 ? 40 : 0));
+    const lostLinks = Math.round(r() * 8 + spikeLost);
+    total = Math.max(0, total + newLinks - lostLinks);
+    return {
+      date: day(today - (89 - i) * DAY),
+      total,
+      newLinks,
+      lostLinks,
+      newDomains: Math.round(r() * 3.2),
+      lostDomains: Math.round(r() * 2.8 + (spikeLost ? 6 : 0)),
+    };
+  });
+  const last30 = daily.slice(-30);
+  const sum = (key: "newLinks" | "lostLinks" | "newDomains" | "lostDomains") => last30.reduce((n, d) => n + d[key], 0);
+  const brand = site.title.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const anchors = [brand, siteHost(site), `https://www.${siteHost(site)}`, "Book now", `${brand} hotel`, "Website", `www.${siteHost(site)}`, "here", "Rooftop bar", "Read more"];
+  const domains = ["travelweekly.com.au", "broadsheet.com.au", "timeout.com", "theurbanlist.com", "concreteplayground.com", "smh.com.au", "goodfood.com.au", "news.com.au"];
+  const linkDomain = (d: string, i: number, offset: number) => ({ domain: d, date: day(today - (i * 3 + offset) * DAY), backlinks: 1 + Math.round(r() * 4), dofollow: Math.round(r() * 3), dt: 10 + Math.round(r() * 75) });
+  return {
+    fetchedAt: now.toISOString(),
+    target,
+    mode,
+    domainTrust: 69,
+    pageTrust: 11,
+    backlinks: total,
+    refDomains: 961,
+    dofollow: Math.round(total * 0.72),
+    nofollow: total - Math.round(total * 0.72),
+    dofollowRefDomains: 604,
+    ips: 812,
+    subnets: 655,
+    textBacklinks: Math.round(total * 0.88),
+    fromHomePages: 74,
+    edu: 3,
+    gov: 1,
+    anchorCount: 418,
+    pagesWithBacklinks: 87,
+    new30: { backlinks: sum("newLinks"), refDomains: sum("newDomains") },
+    lost30: { backlinks: sum("lostLinks"), refDomains: sum("lostDomains") },
+    daily,
+    trust: Array.from({ length: 27 }, (_, i) => ({ date: day(today - (26 - i) * 7 * DAY), dt: 66 + Math.round((i / 26) * 3), pt: 10 + (i > 14 ? 1 : 0) })),
+    anchors: anchors.map((anchor, i) => {
+      const backlinks = Math.round(340 / (1 + i * 0.35));
+      return { anchor, backlinks, refDomains: Math.max(1, Math.round(backlinks / (3 + i))), dofollow: Math.round(backlinks * 0.7), firstSeen: day(today - (400 + i * 90) * DAY) };
+    }),
+    dtBands: [178, 91, 80, 103, 136, 96, 91, 77, 66, 43],
+    countries: [
+      ["us", 440],
+      ["au", 93],
+      ["sg", 48],
+      ["de", 37],
+      ["fr", 24],
+      ["hk", 21],
+      ["md", 17],
+      ["gb", 15],
+      ["at", 12],
+      ["ie", 11],
+    ].map(([code, count]) => ({ code: code as string, count: count as number })),
+    tlds: [
+      ["com", 1_480],
+      ["au", 610],
+      ["net", 220],
+      ["org", 140],
+      ["io", 60],
+    ].map(([tld, count]) => ({ tld: tld as string, count: count as number })),
+    topPages: ["/", "/stay", "/eat-drink", "/events", "/offers"].map((path, i) => ({ url: `https://www.${siteHost(site)}${path}`, backlinks: Math.round(1_900 / (1 + i * 1.7)), refDomains: Math.round(520 / (1 + i * 1.5)) })),
+    newDomains: domains.slice(0, 6).map((d, i) => linkDomain(d, i, 1)),
+    lostDomains: ["blogspot.com", "wordpress.com", "medium.com", "tumblr.com"].map((d, i) => linkDomain(d, i, 2)),
+    compare: [
+      { domain: target, isOwn: true, backlinks: total, refDomains: 961, dofollow: Math.round(total * 0.72), domainTrust: 69 },
+      ...competitors.map((c, i) => ({ domain: hostOf(c.url), isOwn: false, backlinks: 1_200 + i * 2_300, refDomains: 120 + i * 140, dofollow: 800 + i * 1_500, domainTrust: c.domainTrust })),
+    ],
+    errors: {},
+  };
+}
+
+
+export function mockSnapshot(site: SeSite, now: Date, previousProfile?: SeLinkProfile | null, refreshLinks = false): SeSnapshot {
   const r = rng(site.id);
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const host = hostOf(site.url);
@@ -163,6 +334,9 @@ export function mockSnapshot(site: SeSite, now: Date): SeSnapshot {
     url: `http://${d}`,
     domainTrust: 30 + Math.round(r() * 30),
   }));
+  const { rivals, competition } = mockCompetition(rng(site.id + 7), host, engines, keywords, competitors, today);
+  const keepProfile = previousProfile && !refreshLinks && now.getTime() - Date.parse(previousProfile.fetchedAt) < LINK_PROFILE_MAX_AGE_MS;
+  const linkProfile = keepProfile ? previousProfile : mockLinkProfile(rng(site.id + 11), site, competitors, now);
 
   return {
     version: 1,
@@ -194,14 +368,8 @@ export function mockSnapshot(site: SeSite, now: Date): SeSnapshot {
     },
     keywords,
     competitors,
-    serpDomains: [
-      { domain: "tripadvisor.com", visibility: 21, backlinks: 410_000_000, refDomains: 4_100_000, isOwn: false, isCompetitor: false },
-      { domain: host, visibility: 12, backlinks: 5_400, refDomains: 610, isOwn: true, isCompetitor: false },
-      { domain: "indochina-junk.com", visibility: 9, backlinks: 21_000, refDomains: 1_200, isOwn: false, isCompetitor: true },
-      { domain: "aucocruises.com", visibility: 7, backlinks: 3_100, refDomains: 380, isOwn: false, isCompetitor: true },
-      { domain: "booking.com", visibility: 6, backlinks: 900_000_000, refDomains: 2_900_000, isOwn: false, isCompetitor: false },
-      { domain: "vietnam.travel", visibility: 4, backlinks: 120_000, refDomains: 9_800, isOwn: false, isCompetitor: false },
-    ],
+    competition,
+    rivals,
     audit: {
       id: 701_400_000 + (site.id % 1000),
       url: site.url,
@@ -239,7 +407,8 @@ export function mockSnapshot(site: SeSite, now: Date): SeSnapshot {
       ],
       vitals: { mobile: 2, desktop: 1 },
     },
-    backlinks: { total: 5_400, domains: 610, dofollow: 4_100, nofollow: 1_300, anchors: 820, ip: 540 },
+    backlinks: { total: 0, domains: 0, dofollow: 0, nofollow: 0, anchors: 0, ip: 0 },
+    linkProfile,
     ai: {
       brand: site.title,
       engines: aiEngines,
