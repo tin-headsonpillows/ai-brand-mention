@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { suggestPrompts } from "@/lib/brand/analyze";
+import { suggestPrompts, type BrandMode } from "@/lib/brand/analyze";
 import { BudgetExceeded, ensureBudget, recordSpend } from "@/lib/brand/spend";
 import { suggestContext } from "@/lib/brand/customers";
 import { readPrompts, readSettings } from "@/lib/brand/store";
@@ -12,12 +12,13 @@ export const maxDuration = 60;
  * brand, its competitors, the tracked keywords and what its review listings say (category, location, audiences).
  */
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { project?: unknown; count?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { project?: unknown; count?: unknown; brandMode?: unknown } | null;
   const projectId = await resolveProject(typeof body?.project === "string" ? body.project : null);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
   const [config, existing, settings] = await Promise.all([readConfig(projectId), readPrompts(projectId), readSettings(projectId)]);
   if (!config.brand.name) return Response.json({ error: "Set the brand name in Settings first" }, { status: 400 });
   const count = Math.max(5, Math.min(40, Math.round(Number(body?.count) || 20)));
+  const brandMode: BrandMode = body?.brandMode === "branded" || body?.brandMode === "unbranded" ? body.brandMode : "mix";
   try {
     await ensureBudget(0.01);
     const context = await suggestContext(projectId, config, settings).catch(() => undefined);
@@ -28,7 +29,8 @@ export async function POST(req: NextRequest) {
       existing.map((p) => p.text),
       count,
       `${config.settings.country.toUpperCase()} / ${config.settings.language}`,
-      context
+      context,
+      brandMode
     );
     await recordSpend("openai", costUsd);
     return Response.json({ prompts });

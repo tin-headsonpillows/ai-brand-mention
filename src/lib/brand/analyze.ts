@@ -178,6 +178,9 @@ export interface SuggestContext {
   travellers: string[];
 }
 
+/** Whether suggested prompts name the brand: a mix, always ("branded") or never ("unbranded"). */
+export type BrandMode = "mix" | "branded" | "unbranded";
+
 /** The decision-making intents suggestions are grouped by. */
 export const SUGGEST_TOPICS = ["Comparisons", "Worth it?", "Reviews", "Best for", "Right fit", "Who it suits"] as const;
 
@@ -199,9 +202,19 @@ export async function suggestPrompts(
   existing: string[],
   count: number,
   locale: string,
-  context?: SuggestContext
+  context?: SuggestContext,
+  brandMode: BrandMode = "mix"
 ): Promise<{ prompts: SuggestedPrompt[]; costUsd: number }> {
-  if (isMockMode()) return { prompts: mockSuggestions(brand, competitors, keywords, count, context), costUsd: 0 };
+  const terms = brandTerms(brand);
+  const namesBrand = (text: string) => terms.length > 0 && countMentionsAny(text, terms) > 0;
+  const fitsMode = (text: string) => brandMode === "mix" || (brandMode === "branded" ? namesBrand(text) : !namesBrand(text));
+  if (isMockMode()) return { prompts: mockSuggestions(brand, competitors, keywords, context).filter((p) => fitsMode(p.text)).slice(0, count), costUsd: 0 };
+  const brandRule =
+    brandMode === "branded"
+      ? `Every question must name "${brand.name}" (Comparisons, Worth it?, Reviews and Who it suits, plus Best for / Right fit questions asked about the brand, e.g. "Is ${brand.name} a good choice for ...?").`
+      : brandMode === "unbranded"
+        ? `No question may mention "${brand.name}"${terms.length > 1 ? ` or ${terms.filter((t) => t !== brand.name).map((t) => `"${t}"`).join(", ")}` : ""}: write category and need questions where the brand should come up on its own merits - mostly Best for and Right fit, plus Comparisons and Worth it? questions about the category or named competitors (e.g. "Is a luxury cruise worth it for a family of four?").`
+        : "About half should name the brand (Comparisons, Worth it?, Reviews, Who it suits) and half should be unbranded category questions where the brand should appear (Best for, Right fit).";
   const client = getOpenAIClient();
   const completion = await client.chat.completions.create({
     model: ANALYSIS_MODEL,
@@ -211,7 +224,7 @@ export async function suggestPrompts(
       {
         role: "system",
         content: [
-          `Suggest ${count + 6} questions people type into ChatGPT, Claude or Google AI Mode while DECIDING whether to choose "${brand.name}"${brand.website ? ` (${brand.website})` : ""} or one of its alternatives.`,
+          `Suggest ${count + (brandMode === "mix" ? 6 : 10)} questions people type into ChatGPT, Claude or Google AI Mode while DECIDING whether to choose "${brand.name}"${brand.website ? ` (${brand.website})` : ""} or one of its alternatives.`,
           "First work out from the context what kind of business it is (e.g. luxury hotel, resort, cruise, restaurant, tour) and where it is; use that category and location in the questions.",
           "Every question must be consultative or comparative and help someone make a choice. Use these intents, as the topic of each question:",
           '"Comparisons" - the brand against a named competitor or two ("X vs Y: which is better for a honeymoon?");',
@@ -220,7 +233,7 @@ export async function suggestPrompts(
           '"Best for" - shortlists by purpose and place ("best [category] for [purpose] in [location]", e.g. best luxury hotels for a honeymoon in Da Nang);',
           '"Right fit" - which option suits a specific need ("which [category] in [location] is best for travellers with young kids / a wheelchair / remote work?");',
           '"Who it suits" - who the brand is best suited for ("Who is X best suited for?", "is X good for solo travellers?").',
-          "About half should name the brand (Comparisons, Worth it?, Reviews, Who it suits) and half should be unbranded category questions where the brand should appear (Best for, Right fit).",
+          brandRule,
           "Use real purposes and needs from the context (traveller types, what customers praise or criticise). Use the competitors' names in comparisons.",
           "Do NOT write generic questions, price-range or 'how much does it cost' questions, lists of nearby activities or things to do, directions, opening hours or booking how-tos.",
           `Market/locale: ${locale}. Write in the language customers in that market would use. Each question natural and specific (6-18 words).`,
@@ -251,7 +264,7 @@ export async function suggestPrompts(
       const topic = str((p as Record<string, unknown>)?.topic, 40);
       return { text: str((p as Record<string, unknown>)?.text, 300), topic: (SUGGEST_TOPICS as readonly string[]).includes(topic) ? topic : topic || "Comparisons" };
     })
-    .filter((p) => p.text.length > 5 && isDecisionPrompt(p.text) && !taken.has(p.text.toLowerCase()))
+    .filter((p) => p.text.length > 5 && isDecisionPrompt(p.text) && fitsMode(p.text) && !taken.has(p.text.toLowerCase()))
     .slice(0, count);
   return { prompts, costUsd: completionCost(completion.usage) };
 }
@@ -449,7 +462,7 @@ function mockSummary(brand: TrackedBrand, claims: Array<Claim & { platform: stri
   return { paragraphs, generatedAt: new Date().toISOString() };
 }
 
-function mockSuggestions(brand: TrackedBrand, competitors: TrackedCompetitor[], keywords: string[], count: number, context?: SuggestContext): SuggestedPrompt[] {
+function mockSuggestions(brand: TrackedBrand, competitors: TrackedCompetitor[], keywords: string[], context?: SuggestContext): SuggestedPrompt[] {
   const name = brand.name || "this brand";
   const rivals = competitors.length ? competitors.map((c) => c.name) : ["Heritage Line", "Paradise Cruises"];
   const place = keywords[0] ?? "Halong Bay cruise";
@@ -467,6 +480,9 @@ function mockSuggestions(brand: TrackedBrand, competitors: TrackedCompetitor[], 
     { text: `Which ${place} is best for a quiet trip away from the crowds?`, topic: "Right fit" },
     { text: `Which ${place} suits travellers with limited mobility?`, topic: "Right fit" },
     { text: `Best ${place} for a special birthday or anniversary`, topic: "Best for" },
+    { text: `${rivals[0]} vs ${rivals[1] ?? "other luxury options"}: which suits a multi-generation family?`, topic: "Comparisons" },
+    { text: `Is a luxury ${place} worth the price for a family of four?`, topic: "Worth it?" },
+    { text: `Which ${place} has the best food for a foodie couple?`, topic: "Right fit" },
   ];
-  return base.slice(0, count);
+  return base;
 }

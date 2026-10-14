@@ -70,6 +70,7 @@ export function PromptsPanel({
   const [topic, setTopic] = useState("");
   const [upload, setUpload] = useState<Array<{ text: string; topic: string }>>([]);
   const [suggestions, setSuggestions] = useState<Array<{ text: string; topic: string; picked: boolean }>>([]);
+  const [brandMode, setBrandMode] = useState<"mix" | "branded" | "unbranded">("mix");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -99,7 +100,7 @@ export function PromptsPanel({
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/brand/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: projectId, count: 20 }) });
+      const res = await fetch("/api/brand/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: projectId, count: 20, brandMode }) });
       const data = (await res.json()) as { prompts?: Array<{ text: string; topic: string }>; error?: string };
       if (!res.ok || !data.prompts) throw new Error(data.error ?? "Suggestions failed");
       setSuggestions(data.prompts.map((p) => ({ ...p, picked: true })));
@@ -319,6 +320,28 @@ export function PromptsPanel({
               options for a purpose and place, and who it suits - built from your brand, competitors, keywords and what customers say in reviews
               (about $0.001). Price-range and things-to-do questions are left out.
             </p>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                Brand name in the prompts
+              </span>
+              <Segmented
+                value={brandMode}
+                onChange={setBrandMode}
+                ariaLabel="Brand name in the prompts"
+                options={[
+                  { value: "mix", label: "Both", title: "About half name the brand, half are category questions" },
+                  { value: "branded", label: "Include brand", title: "Every prompt names the brand" },
+                  { value: "unbranded", label: "Exclude brand", title: "No prompt names the brand - shows whether AI recommends it unprompted" },
+                ]}
+              />
+              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                {brandMode === "branded"
+                  ? `Every prompt names ${brandName || "the brand"}: what AI says when people ask about it directly.`
+                  : brandMode === "unbranded"
+                    ? `No prompt names ${brandName || "the brand"}: shows whether AI recommends it without being asked.`
+                    : "About half name the brand, half are category questions."}
+              </span>
+            </div>
             <button type="button" disabled={busy} onClick={() => void suggest()} className={primary} style={{ background: "var(--series-1)" }}>
               {busy ? "Thinking..." : suggestions.length ? "Suggest more" : "Suggest 20 prompts"}
             </button>
