@@ -7,6 +7,10 @@
     {
       "path": "/api/brand/run",
       "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/seranking/sync",
+      "schedule": "15 6 * * *"
     }
   ]
 }

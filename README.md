@@ -105,6 +105,30 @@ Search Tracking; old `/google-search-tracking?view=brand-mentions` links redirec
   pauses runs when reached; they continue the next day. Costs & limits shows today's spend and projected cost per
   run / week / month for each model.
 
+## SE Ranking tab
+
+Shows a project's data from the agency's SE Ranking account (one API key, `SERANKING_API_KEY`, for the Project API,
+AI Results Tracker and SE Visible). Each app project is matched to the SE Ranking project tracking the brand's
+website, or you pick one from the list. A daily cron (`/api/seranking/sync`) and the Sync now button pull a snapshot
+(about 20-40 API requests, kept under SE Ranking's 5 requests/second):
+
+- **Overview**: average position, visibility, keywords in the top 10, keywords up / down, site health and AI mention
+  rate; rankings over 30 / 90 / 180 days per search engine (visibility %, average position, top-10 count); position
+  spread; biggest gains and drops this week.
+- **Rankings**: every tracked keyword per search engine with its position, 30-day trend, change since the previous
+  check / 7 / 30 days, best position, search volume, ranking URL and SERP features (marked when they link to the site).
+- **Site audit**: the latest SE Ranking website audit - health score vs the previous audit, failed checks with the
+  number of affected pages, per category, domain metrics and Core Web Vitals.
+- **AI prompts**: SE Ranking's AI Results Tracker per engine (ChatGPT, Google AI Overview / AI Mode, Perplexity,
+  Gemini): brand mention and link rates with their 30-day change and trend, every prompt's mention / link position per
+  engine, mention opportunities, brands mentioned, the most-cited source domains and recommendations. Projects also
+  tracked in SE Visible show its brand metrics and prompts.
+- **Competitors & backlinks**: domains owning the top 10 for the tracked keywords, the project's competitors with
+  Domain Trust, and Backlink Monitor totals.
+
+Without the key the tab shows generated data. Sections SE Ranking refuses (for example, no AI Results Tracker
+add-on) show the API's message and the rest still loads.
+
 ## Images tab
 
 Find, crop and download images as JPG:
@@ -205,6 +229,7 @@ deployer's:
 | `BLOB_READ_WRITE_TOKEN` | For tracking & reviews | - | Vercel Blob store that holds tracking history and fetched reviews. |
 | `LOCAL_BLOB_DIR` | No | - | Local development only: store those JSON documents in this folder instead of Vercel Blob. |
 | `ANTHROPIC_API_KEY` | For Claude in Brand Mentions | - | Claude API key (console.anthropic.com). Without it, Claude answers are placeholders. |
+| `SERANKING_API_KEY` | For the SE Ranking tab | - | API key from SE Ranking (API → Dashboard). Without it, the tab shows generated data. |
 | `APP_SECRET` | For the Articles tab | - | Long random string that encrypts Google sign-in cookies and stored WordPress application passwords. Changing it signs everyone out and requires re-entering WordPress passwords. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google sign-in | - | OAuth "Web application" client with the Sheets and Docs APIs enabled. Redirect URI: `https://<your-domain>/api/google/callback`. Without them, only link-shared Sheets/Docs can be imported. |
 
