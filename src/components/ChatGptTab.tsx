@@ -15,7 +15,19 @@ import { SettingsView } from "@/components/chatgpt/SettingsView";
 import { UsageView } from "@/components/chatgpt/UsageView";
 import { useMentionsSettings } from "@/components/chatgpt/settings";
 import { fmtUsd, modelLabel } from "@/lib/chatgpt/pricing";
-import { readParam, writeParams } from "@/lib/urlState";
+import { writeParams } from "@/lib/urlState";
+import { useSearchParams } from "next/navigation";
+import { ExportContext, ExportMenu, type ExportInfo } from "@/components/export/ExportMenu";
+import {
+  leaderboardSection,
+  mentionRateSection,
+  overviewSection,
+  regionLeadersSection,
+  regionMatrixSection,
+  responsesSection,
+  serpSection,
+} from "@/components/chatgpt/exportSections";
+import type { ExportSection } from "@/lib/export/types";
 import type {
   AnalysisMode,
   AnalysisSummary,
@@ -47,6 +59,8 @@ interface RunState {
   competitors: string[];
   locations: string[];
   cost: RunCost | null;
+  prompt: string;
+  startedAt: string;
 }
 
 type View = "run" | "usage" | "settings";
@@ -74,13 +88,20 @@ const initialState: RunState = {
   competitors: [],
   locations: [],
   cost: null,
+  prompt: "",
+  startedAt: "",
 };
 
 export function ChatGptTab() {
   const [state, setState] = useState<RunState>(initialState);
   const [serpLocation, setSerpLocation] = useState("");
   const abortRef = useRef<AbortController | null>(null);
-  const [view, setView] = useState<View>(() => (VIEWS.some((v) => v.value === readParam("view")) ? (readParam("view") as View) : "run"));
+  // Read through useSearchParams (not window) so the server render and the first client render agree.
+  const searchParams = useSearchParams();
+  const [view, setView] = useState<View>(() => {
+    const v = searchParams.get("view");
+    return VIEWS.some((x) => x.value === v) ? (v as View) : "run";
+  });
   const { settings, save, reload } = useMentionsSettings();
 
   useEffect(() => {
@@ -101,6 +122,8 @@ export function ChatGptTab() {
       running: true,
       statusMessage: "Starting...",
       mode: body.mode ?? "market",
+      prompt: body.seedPrompt,
+      startedAt: new Date().toISOString(),
       brand,
       brandTerms: brand ? [brand, ...splitList(body.brandAliases)] : [],
       competitors: splitList(body.competitors),
@@ -217,6 +240,29 @@ export function ChatGptTab() {
         ]
       : [];
   const multiRegion = state.regions.length > 1;
+  const runDate = state.startedAt ? state.startedAt.slice(0, 10) : "";
+  const exportInfo: ExportInfo = {
+    title: "ChatGPT Mentions",
+    subtitle: [
+      state.prompt ? `"${state.prompt}"` : "",
+      state.locations.length ? state.locations.join(", ") : "",
+      brandMode && state.brand ? `brand: ${state.brand}` : "",
+      runDate ? `run ${new Date(state.startedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    fileStem: ["ChatGPT Mentions", state.prompt.slice(0, 40), runDate].filter(Boolean).join(" - "),
+  };
+  // Every section of the run, in page order, for the full report.
+  const allSections = (): ExportSection[] => [
+    overviewSection({ prompt: state.prompt, mode: state.mode, summary, leaderboard: state.leaderboard, cost, brandRank: state.yourBrandRank }),
+    ...(mentionRows.length > 1 && summary ? [mentionRateSection(mentionRows, summary.completed)] : []),
+    ...(state.regions.length ? [regionLeadersSection(state.regions, brandMode)] : []),
+    ...(multiRegion && state.leaderboard ? [regionMatrixSection(state.regions, state.leaderboard)] : []),
+    ...(state.leaderboard ? [leaderboardSection(state.leaderboard, multiRegion ? `all ${state.regions.length} locations` : state.regions[0]?.location)] : []),
+    ...(state.serpComparisons.length ? [serpSection(state.serpComparisons)] : []),
+    ...(state.results.length ? [responsesSection(state.results, brandMode ? state.brand : "", state.competitors)] : []),
+  ];
   const activeSerp =
     state.serpComparisons.find((c) => c.location === serpLocation) ?? state.serpComparisons[0] ?? null;
 
@@ -241,6 +287,7 @@ export function ChatGptTab() {
       {view === "usage" ? <UsageView settings={settings} onOpenSettings={() => setView("settings")} /> : null}
       {view === "settings" ? <SettingsView settings={settings} save={save} /> : null}
 
+      <ExportContext.Provider value={exportInfo}>
       <div className={view === "run" ? "flex flex-col gap-6" : "hidden"}>
       <AnalyzeForm running={state.running} onSubmit={handleSubmit} onStop={handleStop} settings={settings} onOpenSettings={() => setView("settings")} />
 
@@ -261,6 +308,22 @@ export function ChatGptTab() {
             </p>
           ) : null}
           {state.total > 0 ? <ProgressBar completed={state.completed} total={state.total} /> : null}
+        </div>
+      ) : null}
+
+      {summary && !state.running ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
+            Results
+          </h3>
+          <div className="flex items-center gap-2">
+            <ExportMenu
+              name="Overview"
+              label="Export overview"
+              sections={() => [overviewSection({ prompt: state.prompt, mode: state.mode, summary, leaderboard: state.leaderboard, cost, brandRank: state.yourBrandRank })]}
+            />
+            <ExportMenu name="Full report" label="Export full report" primary sections={allSections} />
+          </div>
         </div>
       ) : null}
 
@@ -363,7 +426,10 @@ export function ChatGptTab() {
               ariaLabel="Local comparison location"
             />
           ) : null}
-          <SerpComparisonView comparison={activeSerp} />
+          <SerpComparisonView
+            comparison={activeSerp}
+            actions={<ExportMenu name="ChatGPT vs Google local" sections={() => [serpSection(state.serpComparisons)]} />}
+          />
         </div>
       ) : null}
 
@@ -376,6 +442,7 @@ export function ChatGptTab() {
         />
       ) : null}
       </div>
+      </ExportContext.Provider>
     </div>
   );
 }

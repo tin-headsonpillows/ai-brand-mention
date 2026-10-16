@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { Leaderboard } from "@/lib/types";
 import { matchesBrand } from "@/lib/mentions";
 import { Segmented } from "@/components/tracking/ui";
+import { ExportMenu } from "@/components/export/ExportMenu";
+import { leaderboardSection } from "@/components/chatgpt/exportSections";
 import { LEVEL_OPTIONS, pct, type EntityLevel } from "./RegionLeaders";
 
 interface BusinessLeaderboardProps {
@@ -74,7 +76,10 @@ export function BusinessLeaderboard({ leaderboard, brandTerms, scope }: Business
             )}
           </p>
         </div>
-        <Segmented value={level} options={LEVEL_OPTIONS} onChange={setLevel} ariaLabel="Group by" />
+        <div className="flex items-center gap-2">
+          <Segmented value={level} options={LEVEL_OPTIONS} onChange={setLevel} ariaLabel="Group by" />
+          <ExportMenu name="Leaderboard" sections={() => [leaderboardSection(leaderboard, scope)]} />
+        </div>
       </div>
 
       <div className="overflow-x-auto">

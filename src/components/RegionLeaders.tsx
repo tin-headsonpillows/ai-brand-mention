@@ -1,5 +1,7 @@
 "use client";
 
+import { ExportMenu } from "@/components/export/ExportMenu";
+import { regionLeadersSection } from "@/components/chatgpt/exportSections";
 import { useState } from "react";
 import type { LeaderboardEntry, RegionReport } from "@/lib/types";
 import { matchesBrand } from "@/lib/mentions";
@@ -160,7 +162,10 @@ export function RegionLeaders({
             first.
           </p>
         </div>
-        <Segmented value={level} options={LEVEL_OPTIONS} onChange={setLevel} ariaLabel="Group by" />
+        <div className="flex items-center gap-2">
+          <Segmented value={level} options={LEVEL_OPTIONS} onChange={setLevel} ariaLabel="Group by" />
+          <ExportMenu name="Top recommendations by location" sections={() => [regionLeadersSection(regions, brandMode)]} />
+        </div>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {regions.map((region) => (

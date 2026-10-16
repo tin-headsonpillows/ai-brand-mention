@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ExportMenu } from "@/components/export/ExportMenu";
+import { mentionRateSection } from "@/components/chatgpt/exportSections";
 
 export interface MentionRateRow {
   name: string;
@@ -33,7 +35,8 @@ export function MentionRateChart({ rows, completed }: MentionRateChartProps) {
         <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
           Mention rate by brand
         </h3>
-        <div className="flex gap-1 text-xs">
+        <div className="flex items-center gap-1 text-xs">
+          <ExportMenu name="Mention rate" sections={() => [mentionRateSection(rows, completed)]} />
           <button
             type="button"
             onClick={() => setView("chart")}

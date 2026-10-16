@@ -34,6 +34,13 @@ that would pass the limit doesn't start, and one that reaches it stops (answers 
 typed into the form are tracked by a fingerprint (hash) and their last 4 characters - never stored. Usage lives in
 the Blob store under `chatgpt/` (one document per month).
 
+**Exports.** Every results section (overview, mention rate, top recommendations by location, who wins where,
+leaderboard, ChatGPT vs. Google local, prompts & responses) and the Usage & costs view has an Export button with
+Excel, PDF and PowerPoint; "Export full report" puts all sections in one file. Files are built in the browser:
+Excel has one sheet per table (filters, frozen headers, number formats), PDF is a landscape report with bar charts
+and tables (Noto Sans is embedded - `public/fonts`, SIL Open Font License - so Vietnamese names print correctly),
+and PowerPoint has editable native charts and tables split across slides.
+
 ## Google Maps Reviews tab
 
 Add any business from Google Maps (search by name or paste a Maps link), a

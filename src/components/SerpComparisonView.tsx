@@ -1,9 +1,12 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { ComparisonRow, MatchCategory, SerpComparison } from "@/lib/types";
 
 interface SerpComparisonViewProps {
   comparison: SerpComparison;
+  /** E.g. an export button, shown beside the heading. */
+  actions?: ReactNode;
 }
 
 const CATEGORY_LABEL: Record<MatchCategory, string> = {
@@ -55,7 +58,7 @@ function Row({ row }: { row: ComparisonRow }) {
   );
 }
 
-export function SerpComparisonView({ comparison }: SerpComparisonViewProps) {
+export function SerpComparisonView({ comparison, actions }: SerpComparisonViewProps) {
   const { rows, location, query, mock } = comparison;
 
   const counts = {
@@ -70,9 +73,12 @@ export function SerpComparisonView({ comparison }: SerpComparisonViewProps) {
       style={{ borderColor: "var(--border-hairline)", background: "var(--surface-1)" }}
     >
       <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-          ChatGPT vs. Google local results
-        </h3>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            ChatGPT vs. Google local results
+          </h3>
+          {actions}
+        </div>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           Comparing businesses ChatGPT mentioned in {location} against Google&apos;s local pack for &quot;{query}&quot;.
         </p>
@@ -95,35 +101,37 @@ export function SerpComparisonView({ comparison }: SerpComparisonViewProps) {
           No businesses found in either source to compare.
         </p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left" style={{ borderColor: "var(--gridline)" }}>
-              <th className="py-1 pr-2 font-medium" style={{ color: "var(--text-secondary)" }}>
-                Business
-              </th>
-              <th className="py-1 pr-2 font-medium" style={{ color: "var(--text-secondary)" }}>
-                Gap signal
-              </th>
-              <th className="py-1 pr-2 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
-                AI mentions
-              </th>
-              <th className="py-1 pr-2 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
-                Rating
-              </th>
-              <th className="py-1 pr-2 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
-                Reviews
-              </th>
-              <th className="py-1 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
-                Local pack #
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <Row key={row.name} row={row} />
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px] text-sm">
+            <thead>
+              <tr className="border-b text-left" style={{ borderColor: "var(--gridline)" }}>
+                <th className="py-1 pr-2 font-medium" style={{ color: "var(--text-secondary)" }}>
+                  Business
+                </th>
+                <th className="py-1 pr-2 font-medium" style={{ color: "var(--text-secondary)" }}>
+                  Gap signal
+                </th>
+                <th className="py-1 pr-2 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
+                  AI mentions
+                </th>
+                <th className="py-1 pr-2 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
+                  Rating
+                </th>
+                <th className="py-1 pr-2 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
+                  Reviews
+                </th>
+                <th className="py-1 font-medium tabular" style={{ color: "var(--text-secondary)" }}>
+                  Local pack #
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <Row key={row.name} row={row} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

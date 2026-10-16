@@ -1,5 +1,7 @@
 "use client";
 
+import { ExportMenu } from "@/components/export/ExportMenu";
+import { regionMatrixSection } from "@/components/chatgpt/exportSections";
 import { useState } from "react";
 import type { Leaderboard, RegionReport } from "@/lib/types";
 import { matchesBrand } from "@/lib/mentions";
@@ -70,7 +72,10 @@ export function RegionMatrix({
             leader in each location is in bold.
           </p>
         </div>
-        <Segmented value={level} options={LEVEL_OPTIONS} onChange={setLevel} ariaLabel="Group by" />
+        <div className="flex items-center gap-2">
+          <Segmented value={level} options={LEVEL_OPTIONS} onChange={setLevel} ariaLabel="Group by" />
+          <ExportMenu name="Who wins where" sections={() => [regionMatrixSection(regions, overall)]} />
+        </div>
       </div>
 
       <div className="overflow-x-auto">

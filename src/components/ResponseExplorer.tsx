@@ -3,6 +3,8 @@
 import { Fragment, useMemo, useState } from "react";
 import type { PromptResult } from "@/lib/types";
 import { MentionBadge } from "./MentionBadge";
+import { ExportMenu } from "@/components/export/ExportMenu";
+import { responsesSection } from "@/components/chatgpt/exportSections";
 
 interface ResponseExplorerProps {
   results: PromptResult[];
@@ -113,6 +115,7 @@ export function ResponseExplorer({ results, brand, competitors, locations }: Res
               ))}
             </select>
           ) : null}
+          <ExportMenu name="Prompts and responses" sections={() => [responsesSection(filtered, brand, competitors)]} />
           {filterButtons.map((b) => (
             <button
               key={b.key}

@@ -5,6 +5,8 @@ import { MENTIONS_MODELS, fmtUsd, modelLabel } from "@/lib/chatgpt/pricing";
 import { useElementWidth } from "@/components/tracking/useElementWidth";
 import { ChartTableToggle, EmptyState, Panel, Segmented, type ChartView } from "@/components/tracking/ui";
 import type { MentionsSettingsView } from "./settings";
+import { ExportContext, ExportMenu } from "@/components/export/ExportMenu";
+import type { ExportSection, ExportTable } from "@/lib/export/types";
 
 interface Totals {
   calls: number;
@@ -25,6 +27,11 @@ type Grain = "day" | "week" | "month";
 /** Color follows the model: listed models keep their slot in list order; anything else shares one slot. */
 const MODEL_COLOR = new Map(MENTIONS_MODELS.map((m, i) => [m.id, `var(--series-${i + 1})`]));
 const OTHER_COLOR = "var(--series-7)";
+/** The same model colors as hex, for exported charts (light-theme values of --series-1..5 and --series-7). */
+const EXPORT_COLOR: Record<string, string> = Object.fromEntries([
+  ...MENTIONS_MODELS.map((m, i) => [m.id, ["2A78D6", "EB6834", "1BAF7A", "EDA100", "E87BA4"][i] ?? "4A3AA7"]),
+  ["other", "4A3AA7"],
+]);
 const colorOf = (model: string) => MODEL_COLOR.get(model) ?? OTHER_COLOR;
 const groupOf = (model: string) => (MODEL_COLOR.has(model) ? model : "other");
 const groupLabel = (group: string) => (group === "other" ? "Other models" : modelLabel(group));
@@ -314,8 +321,96 @@ export function UsageView({ settings, onOpenSettings }: { settings: MentionsSett
   ];
   const periodName = grain === "day" ? "last 30 days" : grain === "week" ? "last 12 weeks" : "last 12 months";
 
+  // Export: the totals, cost by model per day / week / month, the by-model table and each key's spend.
+  const usageSections = (): ExportSection[] => {
+    const grains: Array<[Grain, string]> = [
+      ["day", "Daily (last 30 days)"],
+      ["week", "Weekly (last 12 weeks)"],
+      ["month", "Monthly (last 12 months)"],
+    ];
+    const periodTable = (g: Grain, name: string): { table: ExportTable; rows: Bucket[]; groups: string[] } => {
+      const rs = buckets(days, g, now);
+      const gs = [...MENTIONS_MODELS.map((m) => m.id), "other"].filter((id) => rs.some((r) => r.byGroup[id]));
+      return {
+        rows: rs,
+        groups: gs,
+        table: {
+          name,
+          columns: [{ header: g === "day" ? "Day" : g === "week" ? "Week starting" : "Month", width: 16 }, ...gs.map((id) => ({ header: groupLabel(id), format: "usd" as const })), { header: "Total", format: "usd" }, { header: "API calls", format: "int" }, { header: "Runs", format: "int" }],
+          rows: rs.map((r) => [g === "month" ? r.title : r.from, ...gs.map((id) => r.byGroup[id] ?? 0), r.total, r.calls, r.runs]),
+        },
+      };
+    };
+    const periods = grains.map(([g, name]) => periodTable(g, name));
+    const modelTotals = new Map<string, Totals>();
+    for (const d of days) {
+      if (d.day < isoDay(now - 364 * DAY_MS)) continue;
+      for (const [model, t] of Object.entries(d.byModel)) {
+        const cur = modelTotals.get(model) ?? { calls: 0, input: 0, output: 0, costUsd: 0 };
+        cur.calls += t.calls;
+        cur.input += t.input;
+        cur.output += t.output;
+        cur.costUsd += t.costUsd;
+        modelTotals.set(model, cur);
+      }
+    }
+    const yearTotal = [...modelTotals.values()].reduce((n, t) => n + t.costUsd, 0);
+    return [
+      {
+        title: "API spend",
+        subtitle: "ChatGPT Mentions runs, from the token counts OpenAI returns, at list prices. Days are UTC.",
+        facts: tiles.map((t) => [t.label, `$${t.cost.toFixed(2)} · ${t.runs} runs · ${t.calls} API calls`] as [string, string]),
+        tables: [],
+      },
+      {
+        title: "API cost by model",
+        charts: periods.map((p, i) => ({
+          title: `Cost by model - ${grains[i][1].toLowerCase()}`,
+          categories: p.rows.map((r) => r.label),
+          series: p.groups.map((id) => ({ name: groupLabel(id), values: p.rows.map((r) => r.byGroup[id] ?? 0), color: EXPORT_COLOR[id] })),
+          format: "usd" as const,
+          stacked: true,
+          vertical: true,
+        })),
+        tables: periods.map((p) => p.table),
+      },
+      {
+        title: "By model",
+        subtitle: "Last 12 months",
+        tables: [
+          {
+            name: "By model (12 months)",
+            columns: [{ header: "Model", width: 22 }, { header: "Calls", format: "int" }, { header: "Input tokens", format: "int" }, { header: "Output tokens", format: "int" }, { header: "Cost", format: "usd" }, { header: "Share", format: "pct" }],
+            rows: [...modelTotals.entries()].sort((a, b) => b[1].costUsd - a[1].costUsd).map(([m, t]) => [modelLabel(m), t.calls, t.input, t.output, t.costUsd, yearTotal ? t.costUsd / yearTotal : 0]),
+          },
+        ],
+      },
+      {
+        title: "By API key",
+        subtitle: "Spend today against each key's daily limit",
+        tables: [
+          {
+            name: "By API key",
+            columns: [{ header: "Key", width: 20 }, { header: "Spent today", format: "usd" }, { header: "Daily limit", format: "usd" }, { header: "Last 30 days", format: "usd" }],
+            rows: (settings?.keys ?? []).map((k) => [
+              k.label,
+              k.spentTodayUsd,
+              k.limitUsd,
+              days.filter((d) => d.day >= isoDay(now - 29 * DAY_MS)).reduce((n, d) => n + (d.byKey[k.id]?.costUsd ?? 0), 0),
+            ]),
+          },
+        ],
+      },
+    ];
+  };
+
   return (
     <div className="flex flex-col gap-4">
+      <ExportContext.Provider value={{ title: "ChatGPT Mentions", subtitle: `API usage and costs as of ${today} (UTC)`, fileStem: `ChatGPT Mentions - ${today}` }}>
+        <div className="flex justify-end">
+          <ExportMenu name="Usage and costs" label="Export usage & costs" sections={usageSections} />
+        </div>
+      </ExportContext.Provider>
       <section className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-xl border p-4 md:grid-cols-4" style={{ borderColor: "var(--border-hairline)", background: "var(--surface-1)" }} aria-label="API spend">
         {tiles.map((t) => (
           <div key={t.label} className="flex flex-col gap-0.5">
