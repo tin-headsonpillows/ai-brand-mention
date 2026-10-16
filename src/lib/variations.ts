@@ -1,3 +1,5 @@
+import { isReasoningModel } from "./chatgpt/pricing";
+import type { UsageMeter } from "./chatgpt/usage";
 import { createChatCompletion } from "./execute";
 import { mockVariations } from "./mock";
 
@@ -11,7 +13,8 @@ export async function generateVariations(
   model: string,
   mock: boolean,
   apiKey?: string,
-  location?: string
+  location?: string,
+  meter?: UsageMeter
 ): Promise<string[]> {
   if (mock) return mockVariations(seedPrompt, count);
 
@@ -36,9 +39,11 @@ export async function generateVariations(
         { role: "user", content: `Example question: "${seedPrompt}"` },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.9,
+      ...(isReasoningModel(model) ? { reasoning_effort: "low" as const } : { temperature: 0.9 }),
+      max_tokens: Math.max(1000, count * 60) + (isReasoningModel(model) ? 2000 : 0),
     },
-    apiKey
+    apiKey,
+    meter
   );
 
   const raw = completion.choices[0]?.message?.content ?? "{}";

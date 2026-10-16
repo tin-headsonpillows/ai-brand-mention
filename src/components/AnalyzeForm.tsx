@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { FALLBACK_MODEL, MENTIONS_MODELS, fmtPrice, modelLabel, modelPrice } from "@/lib/chatgpt/pricing";
 import type { AnalysisMode, AnalyzeRequestBody } from "@/lib/types";
+import { CostEstimate } from "@/components/chatgpt/CostEstimate";
+import { keyFingerprint, type MentionsSettingsView } from "@/components/chatgpt/settings";
 import { LOCATION_PLACEHOLDER, regionalPrompt, splitCount } from "@/lib/locations";
 import { LocationsInput, addLocations } from "@/components/LocationsInput";
 import { Segmented, Switch } from "@/components/tracking/ui";
@@ -10,7 +13,11 @@ interface AnalyzeFormProps {
   running: boolean;
   onSubmit: (body: AnalyzeRequestBody) => void;
   onStop: () => void;
+  settings: MentionsSettingsView | null;
+  onOpenSettings: () => void;
 }
+
+const CUSTOM = "custom";
 
 const inputStyle: React.CSSProperties = {
   background: "var(--surface-1)",
@@ -28,7 +35,7 @@ const MODE_DESCRIPTION: Record<AnalysisMode, string> = {
   brand: "Measure how often your brand gets recommended, overall and in each location.",
 };
 
-export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
+export function AnalyzeForm({ running, onSubmit, onStop, settings, onOpenSettings }: AnalyzeFormProps) {
   const [mode, setMode] = useState<AnalysisMode>("market");
   const [seedPrompt, setSeedPrompt] = useState("Top beachfront hotel");
   const [locations, setLocations] = useState<string[]>(["Da Nang"]);
@@ -40,12 +47,31 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
   const [competitors, setCompetitors] = useState("");
   const [variationCount, setVariationCount] = useState(100);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  /** "" = the default from Settings; CUSTOM = a typed model ID. */
   const [model, setModel] = useState("");
+  const [customModel, setCustomModel] = useState("");
   const [localSearchQuery, setLocalSearchQuery] = useState("");
   // Deliberately plain component state - never written to localStorage, sessionStorage,
   // or cookies, so these are wiped whenever the page reloads and must be re-entered.
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [serpApiKey, setSerpApiKey] = useState("");
+  const [keyInfo, setKeyInfo] = useState({ id: "server", label: "Server key" });
+
+  // The key's fingerprint (computed here, so the key isn't sent) finds its spend and limit for the estimate.
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      const info = await keyFingerprint(openaiApiKey).catch(() => ({ id: "server", label: "Server key" }));
+      if (!cancelled) setKeyInfo(info);
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [openaiApiKey]);
+
+  const defaultModel = settings?.model ?? settings?.serverDefaultModel ?? FALLBACK_MODEL;
+  const effectiveModel = model === CUSTOM ? customModel.trim() || defaultModel : model || defaultModel;
 
   // A location still sitting in the text field counts - people often type one and press Run straight away.
   const effectiveLocations = addLocations(locations, locationDraft);
@@ -74,7 +100,7 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
       brandAliases: mode === "brand" ? brandAliases.trim() || undefined : undefined,
       competitors: mode === "brand" ? competitors.trim() || undefined : undefined,
       variationCount,
-      model: model.trim() || undefined,
+      model: model ? effectiveModel : undefined,
       locations: effectiveLocations,
       compareLocal: effectiveLocations.length > 0 && compareLocal,
       localSearchQuery: localSearchQuery.trim() || undefined,
@@ -105,8 +131,9 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
             Your API keys
           </span>
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Kept in your browser for this session only - sent directly with each request, never stored on our
-            server, and cleared when you reload the page. Re-enter them each time you come back.
+            Kept in your browser for this session only and sent with each request. The key itself is never stored -
+            only a fingerprint and its last 4 characters, to track its spend against its daily limit. Cleared when
+            you reload the page.
           </span>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -120,7 +147,7 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
               autoComplete="off"
               value={openaiApiKey}
               onChange={(e) => setOpenaiApiKey(e.target.value)}
-              placeholder="sk-... (falls back to mock mode if empty)"
+              placeholder={settings?.serverKey ? "sk-... (empty: uses the server's key)" : "sk-... (empty: simulated answers)"}
               className="rounded border px-3 py-2 text-sm outline-none"
               style={inputStyle}
             />
@@ -276,6 +303,59 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
         </p>
       </div>
 
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="model" className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+          Model
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <select
+            id="model"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            disabled={running}
+            className="min-w-0 max-w-full flex-1 rounded border px-3 py-2 text-sm outline-none sm:flex-none"
+            style={inputStyle}
+          >
+            <option value="">Default from Settings · {modelLabel(defaultModel)}</option>
+            {MENTIONS_MODELS.map((m) => {
+              const p = modelPrice(m.id);
+              return (
+                <option key={m.id} value={m.id}>
+                  {m.label} · {fmtPrice(p.input)} in / {fmtPrice(p.output)} out per 1M tokens
+                </option>
+              );
+            })}
+            <option value={CUSTOM}>Other model ID...</option>
+          </select>
+          {model === CUSTOM ? (
+            <input
+              value={customModel}
+              onChange={(e) => setCustomModel(e.target.value)}
+              placeholder="e.g. gpt-4.1"
+              aria-label="Model ID"
+              className="min-w-0 flex-1 rounded border px-3 py-2 text-sm outline-none"
+              style={inputStyle}
+            />
+          ) : null}
+        </div>
+        {model === CUSTOM ? (
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            Models not in the list are estimated and limited at flagship prices, to stay on the safe side.
+          </p>
+        ) : null}
+      </div>
+
+      <CostEstimate
+        model={effectiveModel}
+        prompts={variationCount}
+        locations={effectiveLocations.length}
+        keyId={keyInfo.id}
+        keyLabel={keyInfo.label}
+        hasUserKey={Boolean(openaiApiKey.trim())}
+        settings={settings}
+        onOpenSettings={onOpenSettings}
+      />
+
       {effectiveLocations.length > 0 ? (
         <div className="flex flex-col gap-1">
           <Switch
@@ -294,19 +374,6 @@ export function AnalyzeForm({ running, onSubmit, onStop }: AnalyzeFormProps) {
           Advanced options
         </summary>
         <div className="mt-2 flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="model" className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
-              Model override
-            </label>
-            <input
-              id="model"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="defaults to gpt-4o-mini (or OPENAI_MODEL)"
-              className="rounded border px-3 py-2 text-sm outline-none"
-              style={inputStyle}
-            />
-          </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="localSearchQuery" className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
               Local search query override

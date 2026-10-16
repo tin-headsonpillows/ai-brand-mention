@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
-import { DEFAULT_MODEL, isMockMode } from "@/lib/openai";
+import { isMockMode } from "@/lib/openai";
+import { estimateRun, fmtUsd } from "@/lib/chatgpt/pricing";
+import { BudgetExceeded, identifyKey, limitFor, readSettings, serverDefaultModel, startMeter, type UsageMeter } from "@/lib/chatgpt/usage";
 import { generateVariations } from "@/lib/variations";
 import { askChatGPT } from "@/lib/execute";
 import { mockChatResponse } from "@/lib/mock";
@@ -16,6 +18,7 @@ import type {
   Leaderboard,
   PromptResult,
   RegionReport,
+  RunCost,
   SerpComparison,
   StreamEvent,
 } from "@/lib/types";
@@ -53,7 +56,8 @@ export async function POST(req: NextRequest) {
   const segments = locations.length > 0 ? locations : [""];
   const variationCount = clamp(body.variationCount ?? MAX_VARIATIONS, MIN_VARIATIONS, MAX_VARIATIONS);
   const perSegment = splitCount(variationCount, segments.length);
-  const model = body.model?.trim() || DEFAULT_MODEL;
+  const settings = await readSettings();
+  const model = body.model?.trim() || settings.model || serverDefaultModel();
   const openaiApiKey = body.openaiApiKey?.trim() || undefined;
   const serpApiKey = body.serpApiKey?.trim() || undefined;
   const mock = isMockMode(openaiApiKey);
@@ -77,8 +81,43 @@ export async function POST(req: NextRequest) {
         }
       };
 
+      const total = perSegment.reduce((a, b) => a + b, 0);
+      const estimateUsd = estimateRun(model, total, segments.length).totalUsd;
+      let meter: UsageMeter | null = null;
+      let budgetHit = false;
+      const mockKey = identifyKey(openaiApiKey);
+      const sendCost = (final: boolean) =>
+        send({
+          type: "cost",
+          cost: {
+            model,
+            mock,
+            estimateUsd,
+            actualUsd: meter?.run.costUsd ?? 0,
+            calls: meter?.run.calls ?? 0,
+            inputTokens: meter?.run.input ?? 0,
+            outputTokens: meter?.run.output ?? 0,
+            keyLabel: meter?.keyLabel ?? mockKey.label,
+            spentTodayUsd: meter?.spentToday ?? 0,
+            limitUsd: meter?.limitUsd ?? limitFor(settings, mockKey.id),
+            final,
+            budgetHit,
+          } satisfies RunCost,
+        });
+
       try {
-        const total = perSegment.reduce((a, b) => a + b, 0);
+        if (!mock) {
+          meter = (await startMeter(openaiApiKey)).meter;
+          const left = Math.max(0, meter.limitUsd - meter.spentBefore);
+          if (estimateUsd > left) {
+            send({
+              type: "error",
+              message: `This run is estimated at ${fmtUsd(estimateUsd)}, but only ${fmtUsd(left)} is left today of the ${fmtUsd(meter.limitUsd)} daily limit for ${meter.keyLabel}. Run fewer prompts, choose a cheaper model, or raise the limit in Settings.`,
+            });
+            return;
+          }
+        }
+        sendCost(false);
         send({
           type: "status",
           stage: "generating",
@@ -97,7 +136,8 @@ export async function POST(req: NextRequest) {
               model,
               mock,
               openaiApiKey,
-              location || undefined
+              location || undefined,
+              meter ?? undefined
             )
           )
         );
@@ -119,11 +159,13 @@ export async function POST(req: NextRequest) {
         await runWithConcurrency(
           jobs,
           CONCURRENCY,
-          async ({ prompt, location }, index): Promise<PromptResult> => {
+          async ({ prompt, location }, index): Promise<PromptResult | null> => {
+            // Once the daily limit is reached, prompts not yet sent are skipped; answers already paid for still count.
+            if (budgetHit) return null;
             try {
               const response = mock
                 ? mockChatResponse(prompt, brand, competitors, index, location)
-                : await askChatGPT(prompt, model, openaiApiKey);
+                : await askChatGPT(prompt, model, openaiApiKey, meter ?? undefined);
               const brandCount = brandTerms.length ? countMentionsAny(response, brandTerms) : 0;
               const competitorCounts: Record<string, number> = {};
               for (const name of competitors) {
@@ -131,6 +173,10 @@ export async function POST(req: NextRequest) {
               }
               return { index, prompt, response, brandMentioned: brandCount > 0, brandCount, competitorCounts, location };
             } catch (err) {
+              if (err instanceof BudgetExceeded) {
+                budgetHit = true;
+                return null;
+              }
               return {
                 index,
                 prompt,
@@ -144,9 +190,11 @@ export async function POST(req: NextRequest) {
             }
           },
           (result) => {
+            if (!result) return;
             results.push(result);
             completed++;
             send({ type: "result", result, completed, total: jobs.length });
+            if (completed % 10 === 0) sendCost(false);
           },
           () => aborted
         );
@@ -154,6 +202,14 @@ export async function POST(req: NextRequest) {
         if (aborted) return;
         results.sort((a, b) => a.index - b.index);
         send({ type: "summary", summary: buildSummary(brand, competitors, results, model, mock, mode, locations) });
+        if (budgetHit && meter) {
+          send({
+            type: "error",
+            message: `Stopped after ${results.filter((r) => !r.error).length} answers: the daily limit for ${meter.keyLabel} (${fmtUsd(meter.limitUsd)}) was reached. The leaderboard and local comparison were skipped.`,
+          });
+          send({ type: "status", stage: "done", message: "Stopped at the daily limit." });
+          return;
+        }
 
         send({
           type: "status",
@@ -162,7 +218,7 @@ export async function POST(req: NextRequest) {
             ? "Building the business leaderboards (mock mode)..."
             : "Re-reading responses to find every business mentioned...",
         });
-        const index = await indexMentions(results, model, mock, openaiApiKey);
+        const index = await indexMentions(results, model, mock, openaiApiKey, meter ?? undefined);
         if (aborted) return;
         const leaderboard = buildLeaderboard(index, results);
         const regions: RegionReport[] = locations.map((location) => {
@@ -213,8 +269,12 @@ export async function POST(req: NextRequest) {
         }
         send({ type: "status", stage: "done", message: "Done." });
       } catch (err) {
+        if (err instanceof BudgetExceeded) budgetHit = true;
         send({ type: "error", message: err instanceof Error ? err.message : "Unexpected error" });
       } finally {
+        // Record the run's usage even when it stopped early.
+        if (meter) await meter.flush(meter.run.calls > 0);
+        sendCost(true);
         try {
           controller.close();
         } catch {

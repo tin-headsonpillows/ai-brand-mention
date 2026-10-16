@@ -117,6 +117,24 @@ export interface SerpComparison {
   rows: ComparisonRow[];
 }
 
+/** What a run cost (or would cost, in mock mode), against its API key's daily limit. */
+export interface RunCost {
+  model: string;
+  mock: boolean;
+  /** Typical cost estimated before the run. */
+  estimateUsd: number;
+  /** Measured from the API's token counts so far. */
+  actualUsd: number;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  keyLabel: string;
+  spentTodayUsd: number;
+  limitUsd: number;
+  final: boolean;
+  budgetHit: boolean;
+}
+
 export type StreamEvent =
   | { type: "status"; stage: "generating" | "executing" | "aggregating" | "serp" | "done"; message: string }
   | { type: "variations"; variations: string[] }
@@ -124,4 +142,5 @@ export type StreamEvent =
   | { type: "summary"; summary: AnalysisSummary }
   | { type: "leaderboard"; leaderboard: Leaderboard; yourBrandRank: number | null; regions: RegionReport[] }
   | { type: "serp"; comparison: SerpComparison }
+  | { type: "cost"; cost: RunCost }
   | { type: "error"; message: string };

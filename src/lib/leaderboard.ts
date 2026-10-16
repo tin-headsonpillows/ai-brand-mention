@@ -1,3 +1,5 @@
+import { isReasoningModel } from "./chatgpt/pricing";
+import { BudgetExceeded, type UsageMeter } from "./chatgpt/usage";
 import { createChatCompletion } from "./execute";
 import { runWithConcurrency } from "./concurrency";
 import { matchesBrand } from "./mentions";
@@ -38,7 +40,8 @@ export async function indexMentions(
   results: PromptResult[],
   model: string,
   mock: boolean,
-  apiKey?: string
+  apiKey?: string,
+  meter?: UsageMeter
 ): Promise<MentionIndex> {
   const usable = results.filter((r) => !r.error && r.response.trim());
   if (usable.length === 0) return { mentions: [] };
@@ -51,13 +54,13 @@ export async function indexMentions(
   await runWithConcurrency(
     chunks,
     EXTRACT_CONCURRENCY,
-    (chunk) => extractChunk(chunk, model, apiKey),
+    (chunk) => extractChunk(chunk, model, apiKey, meter),
     (mentions) => raw.push(...mentions),
     () => false
   );
   if (raw.length === 0) return { mentions: [] };
 
-  const groups = await consolidate(raw, model, apiKey);
+  const groups = await consolidate(raw, model, apiKey, meter);
   return {
     mentions: raw.map((m) => {
       const group = groups.get(m.name.toLowerCase());
@@ -66,7 +69,7 @@ export async function indexMentions(
   };
 }
 
-async function extractChunk(chunk: PromptResult[], model: string, apiKey?: string): Promise<RawMention[]> {
+async function extractChunk(chunk: PromptResult[], model: string, apiKey?: string, meter?: UsageMeter): Promise<RawMention[]> {
   const known = new Set(chunk.map((r) => r.index));
   const listing = chunk.map((r) => `[${r.index}] ${r.response}`).join("\n\n");
   try {
@@ -86,9 +89,10 @@ async function extractChunk(chunk: PromptResult[], model: string, apiKey?: strin
           { role: "user", content: listing },
         ],
         response_format: { type: "json_object" },
-        temperature: 0,
+        ...(isReasoningModel(model) ? { reasoning_effort: "low" as const } : { temperature: 0 }),
       },
-      apiKey
+      apiKey,
+      meter
     );
     const parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as ChunkExtraction;
     const out: RawMention[] = [];
@@ -105,7 +109,8 @@ async function extractChunk(chunk: PromptResult[], model: string, apiKey?: strin
       }
     }
     return out;
-  } catch {
+  } catch (err) {
+    if (err instanceof BudgetExceeded) throw err;
     return []; // skip a malformed/failed chunk rather than failing the whole leaderboard
   }
 }
@@ -114,7 +119,8 @@ async function extractChunk(chunk: PromptResult[], model: string, apiKey?: strin
 async function consolidate(
   raw: RawMention[],
   model: string,
-  apiKey?: string
+  apiKey?: string,
+  meter?: UsageMeter
 ): Promise<Map<string, { name: string; brand: string }>> {
   // Distinct names, most-mentioned first; the first spelling seen stands for its case variants.
   const counts = new Map<string, { name: string; count: number }>();
@@ -149,9 +155,10 @@ async function consolidate(
           { role: "user", content: toConsolidate.map((n, i) => `${i}. ${n}`).join("\n") },
         ],
         response_format: { type: "json_object" },
-        temperature: 0,
+        ...(isReasoningModel(model) ? { reasoning_effort: "low" as const } : { temperature: 0 }),
       },
-      apiKey
+      apiKey,
+      meter
     );
     const parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as ConsolidationResult;
     for (const group of parsed.groups ?? []) {

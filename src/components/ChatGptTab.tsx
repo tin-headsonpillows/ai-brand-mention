@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnalyzeForm } from "@/components/AnalyzeForm";
 import { ProgressBar } from "@/components/ProgressBar";
 import { StatTile } from "@/components/StatTile";
@@ -11,6 +11,11 @@ import { SerpComparisonView } from "@/components/SerpComparisonView";
 import { RegionLeaders } from "@/components/RegionLeaders";
 import { RegionMatrix } from "@/components/RegionMatrix";
 import { Segmented } from "@/components/tracking/ui";
+import { SettingsView } from "@/components/chatgpt/SettingsView";
+import { UsageView } from "@/components/chatgpt/UsageView";
+import { useMentionsSettings } from "@/components/chatgpt/settings";
+import { fmtUsd, modelLabel } from "@/lib/chatgpt/pricing";
+import { readParam, writeParams } from "@/lib/urlState";
 import type {
   AnalysisMode,
   AnalysisSummary,
@@ -18,6 +23,7 @@ import type {
   Leaderboard,
   PromptResult,
   RegionReport,
+  RunCost,
   SerpComparison,
   StreamEvent,
 } from "@/lib/types";
@@ -40,7 +46,15 @@ interface RunState {
   brandTerms: string[];
   competitors: string[];
   locations: string[];
+  cost: RunCost | null;
 }
+
+type View = "run" | "usage" | "settings";
+const VIEWS: Array<{ value: View; label: string }> = [
+  { value: "run", label: "Analysis" },
+  { value: "usage", label: "Usage & costs" },
+  { value: "settings", label: "Settings" },
+];
 
 const initialState: RunState = {
   running: false,
@@ -59,12 +73,19 @@ const initialState: RunState = {
   brandTerms: [],
   competitors: [],
   locations: [],
+  cost: null,
 };
 
 export function ChatGptTab() {
   const [state, setState] = useState<RunState>(initialState);
   const [serpLocation, setSerpLocation] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const [view, setView] = useState<View>(() => (VIEWS.some((v) => v.value === readParam("view")) ? (readParam("view") as View) : "run"));
+  const { settings, save, reload } = useMentionsSettings();
+
+  useEffect(() => {
+    writeParams({ view: view === "run" ? null : view });
+  }, [view]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -130,10 +151,12 @@ export function ChatGptTab() {
           error: err instanceof Error ? err.message : "Unexpected error",
         }));
       }
+      void reload();
       return;
     }
 
     setState((s) => ({ ...s, running: false }));
+    void reload();
 
     function applyEvent(event: StreamEvent) {
       setState((s) => {
@@ -153,6 +176,8 @@ export function ChatGptTab() {
             return { ...s, summary: event.summary };
           case "leaderboard":
             return { ...s, leaderboard: event.leaderboard, yourBrandRank: event.yourBrandRank, regions: event.regions };
+          case "cost":
+            return { ...s, cost: event.cost };
           case "serp":
             return {
               ...s,
@@ -167,9 +192,10 @@ export function ChatGptTab() {
         }
       });
     }
-  }, []);
+  }, [reload]);
 
   const summary = state.summary;
+  const cost = state.cost;
   const brandMode = state.mode === "brand";
   const mentionRows: MentionRateRow[] =
     summary && brandMode
@@ -196,7 +222,8 @@ export function ChatGptTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-1">
+      <header className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
         <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
           ChatGPT Mentions
         </h2>
@@ -205,9 +232,17 @@ export function ChatGptTab() {
           variations for each location, run them all through the ChatGPT API, and rank which businesses it recommends
           most - or how often your own brand makes the list.
         </p>
+        </div>
+        <div className="self-start">
+          <Segmented value={view} options={VIEWS} onChange={setView} ariaLabel="ChatGPT Mentions view" />
+        </div>
       </header>
 
-      <AnalyzeForm running={state.running} onSubmit={handleSubmit} onStop={handleStop} />
+      {view === "usage" ? <UsageView settings={settings} onOpenSettings={() => setView("settings")} /> : null}
+      {view === "settings" ? <SettingsView settings={settings} save={save} /> : null}
+
+      <div className={view === "run" ? "flex flex-col gap-6" : "hidden"}>
+      <AnalyzeForm running={state.running} onSubmit={handleSubmit} onStop={handleStop} settings={settings} onOpenSettings={() => setView("settings")} />
 
       {state.error ? (
         <div
@@ -226,6 +261,32 @@ export function ChatGptTab() {
             </p>
           ) : null}
           {state.total > 0 ? <ProgressBar completed={state.completed} total={state.total} /> : null}
+        </div>
+      ) : null}
+
+      {cost && (state.running || summary || cost.final) ? (
+        <div
+          className="flex flex-wrap items-baseline gap-x-6 gap-y-1 rounded-lg border px-4 py-3 text-sm"
+          style={{ borderColor: cost.budgetHit ? "var(--status-critical)" : "var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-secondary)" }}
+          aria-live="polite"
+        >
+          <span>
+            {cost.final ? "Run cost" : "Cost so far"}{" "}
+            <span className="text-lg font-semibold tabular" style={{ color: "var(--text-primary)" }}>
+              {cost.mock ? "$0.00" : fmtUsd(cost.actualUsd)}
+            </span>
+          </span>
+          <span className="text-xs">
+            {cost.mock
+              ? `simulated run - with a real key about ${fmtUsd(cost.estimateUsd)}`
+              : `estimated ${fmtUsd(cost.estimateUsd)} · ${cost.calls} calls · ${cost.inputTokens.toLocaleString("en-US")} input / ${cost.outputTokens.toLocaleString("en-US")} output tokens`}{" "}
+            · {modelLabel(cost.model)}
+          </span>
+          {!cost.mock ? (
+            <span className="text-xs">
+              {cost.keyLabel}: {fmtUsd(cost.spentTodayUsd)} of {fmtUsd(cost.limitUsd)} today
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -314,6 +375,7 @@ export function ChatGptTab() {
           locations={state.locations}
         />
       ) : null}
+      </div>
     </div>
   );
 }

@@ -23,6 +23,17 @@ Put `{location}` in the prompt to control where the place goes; otherwise
 " in <location>" is appended, and a prompt that already names one of the
 locations has it swapped for each of the others.
 
+**Costs and limits.** The run form picks the model (GPT-4o mini, GPT-4.1 mini, GPT-5.4 nano / mini, GPT-5.5 or
+any other model ID) and shows the run's estimated cost before it starts, with what the API key has spent today
+against its daily limit; the exact cost (from the token counts OpenAI returns) shows during and after the run.
+**Usage & costs** charts spend by model per day, week or month, with totals for today, this week, this month and
+the last 12 months, a by-model table (calls, input / output tokens, cost) and each key's spend against its limit.
+**Settings** sets the default model and the daily spending limit (USD, UTC days): one default for every key, plus
+an optional limit per key. Before each call its worst-case cost is checked against what the key has left: a run
+that would pass the limit doesn't start, and one that reaches it stops (answers already paid for are kept). Keys
+typed into the form are tracked by a fingerprint (hash) and their last 4 characters - never stored. Usage lives in
+the Blob store under `chatgpt/` (one document per month).
+
 ## Google Maps Reviews tab
 
 Add any business from Google Maps (search by name or paste a Maps link), a
@@ -235,7 +246,7 @@ deployer's:
 | Env var | Required | Default | Purpose |
 |---|---|---|---|
 | `OPENAI_API_KEY` | For real runs | - | Your OpenAI API key. Without it, the app uses mock mode. |
-| `OPENAI_MODEL` | No | `gpt-4o-mini` | Chat model used both to generate prompt variations and to answer them. Can be overridden per-run in the UI's "Advanced options". |
+| `OPENAI_MODEL` | No | `gpt-4o-mini` | ChatGPT Mentions' default model until one is picked in its Settings (and the model for other tabs' ChatGPT helpers). Can be changed per run in the form. |
 | `SERPAPI_API_KEY` (or `SERPAPI_API_KEY_1..20`) | For real SerpApi data | - | Google Search Tracking, the Reviews tab, and the ChatGPT tab's local comparison. Several numbered keys fail over to the next when one runs out of searches. |
 | `OPENAI_IMAGE_MODEL` | No | `gpt-image-2.5-flare` | Default model in the Images tab's generator until a viewer picks another (must be one listed in `src/lib/images/models.ts`; your OpenAI organisation may need to be verified to use GPT Image models). |
 | `BLOB_READ_WRITE_TOKEN` | For tracking & reviews | - | Vercel Blob store that holds tracking history and fetched reviews. |
@@ -277,9 +288,9 @@ deployer's:
 
 ## Cost & rate limits
 
-Each run makes 1 call to generate variations plus 1 call per prompt (up to
-100 by default). Use the "Number of prompts to run" slider to reduce this
-while testing. Failed calls are retried a couple of times with backoff and
+Each ChatGPT Mentions run makes 1 call per location to generate variations, 1 call per prompt (up to 100), and
+about 1 call per 20 answers to build the leaderboard; the form shows the estimated cost and each key has a daily
+spending limit (see above). Use the "Number of prompts to run" slider to reduce this while testing. Failed calls are retried a couple of times with backoff and
 otherwise reported per-prompt rather than failing the whole run.
 
 The Reviews tab spends 1 SerpApi search per page of reviews (8 on the first
