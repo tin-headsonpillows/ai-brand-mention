@@ -84,15 +84,43 @@ export interface PlanRow {
   publishDate: string;
   secondaryKeywords: string;
   status: string;
+  writer: string;
+  dueDate: string;
+  priority: string;
+  action: string;
+  publishUrl: string;
 }
 
 export type PlanField = Exclude<keyof PlanRow, "rowNumber">;
 
+export const PLAN_FIELDS: PlanField[] = [
+  "title",
+  "docUrl",
+  "focusKeyword",
+  "secondaryKeywords",
+  "slug",
+  "metaTitle",
+  "metaDescription",
+  "categories",
+  "tags",
+  "publishDate",
+  "status",
+  "writer",
+  "dueDate",
+  "priority",
+  "action",
+  "publishUrl",
+];
+
 export interface SheetPreview {
   spreadsheetId: string;
   title: string;
-  tabs: Array<{ title: string; gid: number }>;
+  /** Every tab, with how well its best row matches content-plan headers (higher = more plan-like). */
+  tabs: Array<{ title: string; gid: number; score?: number }>;
   tab: string;
+  /** 1-based row the headers were read from, and the first rows of the tab to pick another one. */
+  headerRow: number;
+  topRows: Array<{ rowNumber: number; preview: string }>;
   headers: string[];
   /** Cell text per row (after the header row), with the link behind each cell when there is one. */
   rows: Array<{ rowNumber: number; cells: string[]; links: Array<string | null> }>;

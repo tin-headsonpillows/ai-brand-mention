@@ -1,8 +1,9 @@
 import sanitizeHtml from "sanitize-html";
-import type { PlanField, SheetPreview } from "../articles/types";
+import type { SheetPreview } from "../articles/types";
 import { docToHtml, type DocImage } from "./docs";
 import { googleAccessToken } from "./oauth";
-import { SAMPLE_DOCS, SAMPLE_SHEET } from "./sample";
+import { SAMPLE_DOCS, SAMPLE_WORKBOOK } from "./sample";
+import { pickTab, tabScore, toPreview, workbookFromXlsx, type Cell, type TabMatrix } from "./sheetReader";
 
 /**
  * Reads content-plan Sheets and article Docs. Signed in with Google, it uses the Sheets/Docs APIs (private
@@ -21,57 +22,7 @@ export function docIdFrom(url: string): string | null {
   return url.match(/\/document\/d\/([\w-]{20,})/)?.[1] ?? null;
 }
 
-const HEADER_HINTS: Record<PlanField, RegExp> = {
-  title: /^(article |post |blog )?(title|headline|h1|topic|tieu de|ten bai)/,
-  focusKeyword: /^(focus |main |primary |target )?(key ?word|kw|tu khoa)( chinh)?$/,
-  docUrl: /(doc|document|draft|content|article|bai viet).*(link|url)|^(google )?docs?$|^link$|^url$/,
-  slug: /slug|permalink/,
-  metaTitle: /(meta|seo) title|title tag/,
-  metaDescription: /(meta )?desc/,
-  categories: /categor|chuyen muc|danh muc/,
-  tags: /^tags?$|^the$/,
-  publishDate: /(publish|post|go.?live|schedule|ngay).*(date|ngay)?|^date$/,
-  secondaryKeywords: /(secondary|related|lsi|supporting|phu).*(key ?words?|kw|tu khoa)/,
-  status: /status|trang thai/,
-};
-
-const normHeader = (h: string) =>
-  h
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[đĐ]/g, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-/** Guesses which column holds each field; secondary keywords are matched before the plain keyword column. */
-export function detectMapping(headers: string[], rows: SheetPreview["rows"]): Record<PlanField, number> {
-  const normalized = headers.map(normHeader);
-  const used = new Set<number>();
-  const mapping = {} as Record<PlanField, number>;
-  const order: PlanField[] = ["secondaryKeywords", "metaTitle", "metaDescription", "focusKeyword", "slug", "docUrl", "title", "categories", "tags", "publishDate", "status"];
-  for (const field of order) {
-    const index = normalized.findIndex((h, i) => !used.has(i) && HEADER_HINTS[field].test(h));
-    mapping[field] = index;
-    if (index >= 0) used.add(index);
-  }
-  // The Doc column is whichever column links to Google Docs most often, whatever its header says.
-  let best = -1;
-  let bestCount = 0;
-  headers.forEach((_, c) => {
-    const count = rows.filter((r) => /docs\.google\.com\/document\//.test(r.links[c] ?? r.cells[c] ?? "")).length;
-    if (count > bestCount) {
-      best = c;
-      bestCount = count;
-    }
-  });
-  if (best >= 0) {
-    if (mapping.title === best) mapping.title = -1;
-    mapping.docUrl = best;
-  }
-  return mapping;
-}
+export { detectMapping } from "./sheetReader";
 
 async function googleJson(url: string, token: string): Promise<Record<string, unknown>> {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
@@ -89,64 +40,58 @@ type Json = Record<string, unknown>;
 const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : {});
 const arr = (v: unknown): Json[] => (Array.isArray(v) ? (v as Json[]) : []);
 
-export async function readSheet(url: string, tab?: string): Promise<SheetPreview> {
-  if (url.trim() === "sample") return { ...SAMPLE_SHEET, mapping: detectMapping(SAMPLE_SHEET.headers, SAMPLE_SHEET.rows) };
+export interface ReadSheetOptions {
+  /** Tab name; otherwise the tab in the link (gid), otherwise the most plan-like tab. */
+  tab?: string;
+  /** 1-based header row; otherwise detected. */
+  headerRow?: number;
+}
+
+const gridCell = (cell: unknown): Cell => {
+  const c = obj(cell);
+  const link =
+    (typeof c.hyperlink === "string" ? c.hyperlink : null) ??
+    arr(c.chipRuns).map((r) => String(obj(obj(obj(r).chip).richLinkProperties).uri ?? "")).find(Boolean) ??
+    arr(c.textFormatRuns).map((r) => String(obj(obj(obj(r).format).link).uri ?? "")).find(Boolean) ??
+    null;
+  return { text: String(c.formattedValue ?? "").replace(/\s+/g, " ").trim(), link };
+};
+
+export async function readSheet(url: string, options: ReadSheetOptions = {}): Promise<SheetPreview> {
+  if (url.trim() === "sample") return readSampleWorkbook(options);
   const ref = sheetIdFrom(url);
   if (!ref) throw new Error("That isn't a Google Sheets link (it should contain /spreadsheets/d/...)");
   const token = await googleAccessToken();
-  if (!token) return readPublicSheet(ref.id, ref.gid);
+  if (!token) return readPublicWorkbook(ref.id, ref.gid, options);
 
   const meta = await googleJson(
-    `https://sheets.googleapis.com/v4/spreadsheets/${ref.id}?fields=properties.title,sheets.properties(sheetId,title,index)`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${ref.id}?fields=properties.title,sheets.properties(sheetId,title,index,hidden)`,
     token
   );
-  const tabs = arr(meta.sheets).map((s) => ({ title: String(obj(s.properties).title ?? ""), gid: Number(obj(s.properties).sheetId ?? 0) }));
-  const chosen = tabs.find((t) => t.title === tab) ?? tabs.find((t) => t.gid === ref.gid) ?? tabs[0];
-  if (!chosen) throw new Error("This spreadsheet has no tabs");
-  const range = `'${chosen.title.replace(/'/g, "''")}'!A1:Z1000`;
+  const all = arr(meta.sheets)
+    .map((s) => obj(s.properties))
+    .filter((p) => p.hidden !== true)
+    .map((p) => ({ title: String(p.title ?? ""), gid: Number(p.sheetId ?? 0) }));
+  if (!all.length) throw new Error("This spreadsheet has no tabs");
+  // Score every tab from its first rows (one request), to pick the content plan and show the others.
+  const quote = (t: string) => `'${t.replace(/'/g, "''")}'`;
+  const ranges = all.slice(0, 40).map((t) => `ranges=${encodeURIComponent(`${quote(t.title)}!A1:AZ25`)}`).join("&");
+  const tops = await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${ref.id}/values:batchGet?${ranges}&majorDimension=ROWS`, token).catch(() => ({ valueRanges: [] }));
+  const scored: TabMatrix[] = all.map((t, i) => ({
+    ...t,
+    matrix: arr(obj(arr((tops as Json).valueRanges)[i]).values as unknown).map((row) => (Array.isArray(row) ? row.map((v) => ({ text: String(v ?? "").trim(), link: null })) : [])),
+  }));
+  const chosen = all.find((t) => t.title === options.tab) ?? (options.tab ? undefined : all.find((t) => ref.gid !== undefined && t.gid === ref.gid)) ?? pickTab(scored) ?? all[0];
   const grid = await googleJson(
-    `https://sheets.googleapis.com/v4/spreadsheets/${ref.id}?ranges=${encodeURIComponent(range)}&includeGridData=true&fields=${encodeURIComponent(
+    `https://sheets.googleapis.com/v4/spreadsheets/${ref.id}?ranges=${encodeURIComponent(`${quote(chosen.title)}!A1:AZ1500`)}&includeGridData=true&fields=${encodeURIComponent(
       "sheets.data.rowData.values(formattedValue,hyperlink,textFormatRuns.format.link.uri,chipRuns.chip.richLinkProperties.uri)"
     )}`,
     token
   );
   const rowData = arr(obj(arr(obj(arr(grid.sheets)[0]).data)[0]).rowData);
-  const matrix = rowData.map((row) =>
-    arr(obj(row).values).map((cell) => {
-      const c = obj(cell);
-      const link =
-        (typeof c.hyperlink === "string" ? c.hyperlink : null) ??
-        arr(c.chipRuns).map((r) => String(obj(obj(obj(r).chip).richLinkProperties).uri ?? "")).find(Boolean) ??
-        arr(c.textFormatRuns).map((r) => String(obj(obj(obj(r).format).link).uri ?? "")).find(Boolean) ??
-        null;
-      return { text: String(c.formattedValue ?? "").trim(), link };
-    })
-  );
-  return toPreview(ref.id, String(obj(meta.properties).title ?? "Spreadsheet"), tabs, chosen.title, matrix, "google");
-}
-
-function toPreview(
-  spreadsheetId: string,
-  title: string,
-  tabs: SheetPreview["tabs"],
-  tab: string,
-  matrix: Array<Array<{ text: string; link: string | null }>>,
-  via: SheetPreview["via"]
-): SheetPreview {
-  const headerIndex = matrix.findIndex((r) => r.filter((c) => c.text).length >= 2);
-  if (headerIndex < 0) throw new Error("Couldn't find a header row (a row with at least two column names)");
-  const headers = matrix[headerIndex].map((c) => c.text);
-  const width = Math.max(headers.length, ...matrix.map((r) => r.length));
-  while (headers.length < width) headers.push(`Column ${headers.length + 1}`);
-  const rows = matrix
-    .slice(headerIndex + 1)
-    .map((r, i) => ({
-      rowNumber: headerIndex + 2 + i,
-      cells: Array.from({ length: width }, (_, c) => r[c]?.text ?? ""),
-      links: Array.from({ length: width }, (_, c) => r[c]?.link ?? (/^https?:\/\//.test(r[c]?.text ?? "") ? r[c].text : null)),
-    }))
-    .filter((r) => r.cells.some(Boolean));
-  return { spreadsheetId, title, tabs, tab, headers, rows, mapping: detectMapping(headers, rows), via };
+  const matrix = rowData.map((row) => arr(obj(row).values).map(gridCell));
+  const tabs = scored.map((t) => ({ title: t.title, gid: t.gid, score: tabScore(t) }));
+  return toPreview(ref.id, String(obj(meta.properties).title ?? "Spreadsheet"), tabs, { title: chosen.title, gid: chosen.gid, matrix }, "google", options.headerRow);
 }
 
 function parseCsv(text: string): string[][] {
@@ -178,18 +123,48 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-async function readPublicSheet(id: string, gid?: number): Promise<SheetPreview> {
+const PUBLIC_ERROR = 'Couldn\'t read this sheet. Sign in with Google, or share it as "Anyone with the link can view".';
+
+/**
+ * Without sign-in: the .xlsx export has every tab with the links behind cells. The tab in the link (gid) is
+ * found by comparing its CSV export with each tab, since the export doesn't carry gids.
+ */
+async function readPublicWorkbook(id: string, gid: number | undefined, options: ReadSheetOptions): Promise<SheetPreview> {
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`, { redirect: "follow", signal: AbortSignal.timeout(30_000) });
+  const type = res.headers.get("content-type") ?? "";
+  if (!res.ok || !/spreadsheetml|octet-stream|zip/.test(type)) return readPublicCsv(id, gid, options);
+  const book = await workbookFromXlsx(await res.arrayBuffer());
+  if (!book.tabs.length) throw new Error("This spreadsheet has no tabs");
+  let chosen = book.tabs.find((t) => t.title === options.tab);
+  if (!chosen && !options.tab && gid !== undefined) {
+    const csv = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`, { redirect: "follow", signal: AbortSignal.timeout(20_000) })
+      .then((r) => (r.ok ? r.text() : ""))
+      .catch(() => "");
+    const sig = (rows: string[][]) => rows.slice(0, 8).map((r) => r.map((c) => c.trim()).filter(Boolean).join("|")).join("\n");
+    const target = sig(parseCsv(csv));
+    if (target) chosen = book.tabs.find((t) => sig(t.matrix.map((r) => r.map((c) => c.text))) === target);
+  }
+  chosen ??= pickTab(book.tabs) ?? book.tabs[0];
+  const tabs = book.tabs.map((t) => ({ title: t.title, gid: t.gid, score: tabScore(t) }));
+  return toPreview(id, book.title || "Spreadsheet (public link)", tabs, chosen, "public", options.headerRow);
+}
+
+/** Last resort: one tab as CSV (no tab list, no links). */
+async function readPublicCsv(id: string, gid: number | undefined, options: ReadSheetOptions): Promise<SheetPreview> {
   const res = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv${gid !== undefined ? `&gid=${gid}` : ""}`, {
     redirect: "follow",
     signal: AbortSignal.timeout(20_000),
   });
-  const type = res.headers.get("content-type") ?? "";
-  if (!res.ok || !type.includes("csv")) {
-    throw new Error("Couldn't read this sheet. Sign in with Google, or share it as \"Anyone with the link can view\".");
-  }
+  if (!res.ok || !(res.headers.get("content-type") ?? "").includes("csv")) throw new Error(PUBLIC_ERROR);
   const matrix = parseCsv(await res.text()).map((r) => r.map((text) => ({ text: text.trim(), link: null })));
-  const tabTitle = gid !== undefined ? `Tab ${gid}` : "First tab";
-  return toPreview(id, "Spreadsheet (public link)", [{ title: tabTitle, gid: gid ?? 0 }], tabTitle, matrix, "public");
+  const title = gid !== undefined ? `Tab ${gid}` : "First tab";
+  return toPreview(id, "Spreadsheet (public link)", [{ title, gid: gid ?? 0 }], { title, gid: gid ?? 0, matrix }, "public", options.headerRow);
+}
+
+function readSampleWorkbook(options: ReadSheetOptions): SheetPreview {
+  const tabs = SAMPLE_WORKBOOK.tabs;
+  const chosen = tabs.find((t) => t.title === options.tab) ?? pickTab(tabs) ?? tabs[0];
+  return toPreview("sample", SAMPLE_WORKBOOK.title, tabs.map((t) => ({ title: t.title, gid: t.gid, score: tabScore(t) })), chosen, "sample", options.headerRow);
 }
 
 const SANITIZE: sanitizeHtml.IOptions = {
@@ -226,6 +201,12 @@ export interface FetchedDoc {
 }
 
 export async function readDoc(url: string): Promise<FetchedDoc> {
+  // Docs "created" for the sample plan: an empty brief to import.
+  const created = url.match(/^sample:new:(.+)$/);
+  if (created) {
+    const title = decodeURIComponent(created[1]);
+    return { docId: `sample-new`, title, html: cleanHtml("<h2>Brief</h2><p>(Sample Doc - nothing was created in Google Drive.)</p><h2>Outline</h2><p>H2: </p>"), images: [], via: "sample" };
+  }
   const sample = url.match(/^sample:(\d+)$/);
   if (sample) {
     const doc = SAMPLE_DOCS[Number(sample[1])] ?? SAMPLE_DOCS[0];

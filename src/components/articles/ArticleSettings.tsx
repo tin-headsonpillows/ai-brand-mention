@@ -145,13 +145,24 @@ export function ArticleSettings({
         </div>
       </Panel>
 
-      <Panel title="Google Sheets & Docs" subtitle="where content plans and drafts come from">
+      <Panel title="Google Sheets, Docs & Drive" subtitle="content plans, article Docs and client sharing">
         <div className="flex flex-col gap-3">
           {google?.configured ? (
             google.signedIn ? (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-sm" style={{ color: "var(--text-primary)" }}>
                   ✓ Signed in as <b>{google.email ?? "your Google account"}</b>
+                  {google.canWrite ? (
+                    <span style={{ color: "var(--text-muted)" }}> · can create Docs and edit plans</span>
+                  ) : (
+                    <>
+                      {" "}
+                      <span style={{ color: "var(--status-critical)" }}>· read-only sign-in</span>{" "}
+                      <a href={`/api/google/auth?returnTo=${encodeURIComponent("/articles?view=settings")}`} className="font-medium underline" style={{ color: "var(--series-1)" }}>
+                        Sign in again to allow Docs &amp; write-back
+                      </a>
+                    </>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -168,7 +179,7 @@ export function ArticleSettings({
             ) : (
               <div className="flex flex-col items-start gap-2">
                 <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                  Sign in to import from private Sheets and Docs you can open. Access is read-only and stays in this browser only (an encrypted cookie).
+                  Sign in to read private Sheets and Docs, create article Docs in a project&apos;s Drive folder, write Doc links and statuses into the plan, and share Docs with clients. It acts only on files your account can edit, and the sign-in stays in this browser only (an encrypted cookie).
                 </span>
                 <a href={`/api/google/auth?returnTo=${encodeURIComponent("/articles?view=settings")}`} className={buttonPrimary} style={{ background: "var(--series-1)" }}>
                   Sign in with Google
@@ -178,14 +189,14 @@ export function ArticleSettings({
           ) : (
             <>
               <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                Google sign-in needs a one-time setup in Google Cloud. Until then, files shared as &quot;Anyone with the link can view&quot; can still be imported.
+                Google sign-in needs a one-time setup in Google Cloud. Until then, files shared as &quot;Anyone with the link can view&quot; can still be imported and the content board works, but Docs can&apos;t be created and the plan isn&apos;t written to.
               </p>
               <ol className="flex flex-col gap-2">
                 <Step n={1}>
-                  In <b>Google Cloud Console</b>, create (or pick) a project and enable the <b>Google Sheets API</b> and <b>Google Docs API</b>.
+                  In <b>Google Cloud Console</b>, create (or pick) a project and enable the <b>Google Sheets API</b>, <b>Google Docs API</b> and <b>Google Drive API</b>.
                 </Step>
                 <Step n={2}>
-                  <b>OAuth consent screen</b>: choose <b>Internal</b> if everyone uses your Google Workspace domain (no Google review needed); add the scopes spreadsheets.readonly and documents.readonly.
+                  <b>OAuth consent screen</b>: choose <b>Internal</b> if everyone uses your Google Workspace domain (no Google review needed); add the scopes <code>spreadsheets</code>, <code>documents</code> and <code>drive</code> (needed to create Docs in your folders, write to plans and share Docs).
                 </Step>
                 <Step n={3}>
                   <b>Credentials → Create credentials → OAuth client ID → Web application</b>. Authorised redirect URI: <code className="rounded px-1" style={{ background: "var(--page-plane)" }}>{origin}/api/google/callback</code>

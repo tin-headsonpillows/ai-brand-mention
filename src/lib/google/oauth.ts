@@ -2,17 +2,23 @@ import { cookies } from "next/headers";
 import { open, seal } from "../secretBox";
 
 /**
- * Google sign-in (OAuth 2.0, web server flow) for reading the viewer's Sheets and Docs. Tokens live only in
- * an encrypted, httpOnly cookie in that viewer's browser - nothing is stored on the server.
+ * Google sign-in (OAuth 2.0, web server flow) for the viewer's Sheets, Docs and Drive: reading content plans
+ * and Docs, creating Docs in a project's folder, writing their links and statuses back to the plan, and
+ * sharing Docs with clients. Tokens live only in an encrypted, httpOnly cookie in that viewer's browser -
+ * nothing is stored on the server.
  */
 const SESSION_COOKIE = "g_session";
 const STATE_COOKIE = "g_oauth_state";
 export const GOOGLE_SCOPES = [
   "openid",
   "email",
-  "https://www.googleapis.com/auth/spreadsheets.readonly",
-  "https://www.googleapis.com/auth/documents.readonly",
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/documents",
+  "https://www.googleapis.com/auth/drive",
 ];
+
+/** Scopes needed to create Docs, write to the plan and share (older sign-ins only had read access). */
+const WRITE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive"];
 
 interface Session {
   refreshToken: string;
@@ -20,6 +26,8 @@ interface Session {
   /** Epoch ms when accessToken expires. */
   expiresAt: number;
   email?: string;
+  /** Space-separated scopes Google granted (absent for sessions from before write access existed). */
+  scope?: string;
 }
 
 export function googleConfigured(): boolean {
@@ -72,6 +80,7 @@ async function tokenRequest(body: Record<string, string>) {
     refresh_token?: string;
     expires_in?: number;
     id_token?: string;
+    scope?: string;
     error?: string;
     error_description?: string;
   };
@@ -103,6 +112,7 @@ export async function finishSignIn(origin: string, code: string, state: string):
     accessToken: data.access_token!,
     expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000,
     email: emailFromIdToken(data.id_token),
+    scope: data.scope,
   });
   return parsed.returnTo;
 }
@@ -118,9 +128,32 @@ async function readSession(): Promise<Session | null> {
   return plain ? (JSON.parse(plain) as Session) : null;
 }
 
-export async function signedInEmail(): Promise<{ signedIn: boolean; email?: string }> {
+const canWriteWith = (scope?: string) => Boolean(scope) && WRITE_SCOPES.every((s) => scope!.split(" ").includes(s));
+
+/** Whether a viewer is signed in, and whether they granted the write scopes (create Docs, edit plans, share). */
+export async function signedInEmail(): Promise<{ signedIn: boolean; email?: string; canWrite: boolean }> {
   const session = await readSession();
-  return { signedIn: Boolean(session), email: session?.email };
+  return { signedIn: Boolean(session), email: session?.email, canWrite: canWriteWith(session?.scope) };
+}
+
+/** A token that may write (Drive, Docs, Sheets), or an error explaining what the viewer needs to do. */
+export async function googleWriteToken(): Promise<string> {
+  if (!googleConfigured()) throw new GoogleAccessError("Google sign-in isn't set up on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).", "not_configured");
+  const session = await readSession();
+  if (!session) throw new GoogleAccessError("Sign in with Google first.", "signed_out");
+  if (!canWriteWith(session.scope)) throw new GoogleAccessError("Sign in with Google again to allow creating Docs and editing the plan.", "needs_consent");
+  const token = await googleAccessToken();
+  if (!token) throw new GoogleAccessError("Your Google sign-in expired - sign in again.", "signed_out");
+  return token;
+}
+
+export class GoogleAccessError extends Error {
+  constructor(
+    message: string,
+    readonly code: "not_configured" | "signed_out" | "needs_consent"
+  ) {
+    super(message);
+  }
 }
 
 /** A valid access token for the signed-in viewer (refreshed when needed), or null when not signed in. */
@@ -131,7 +164,7 @@ export async function googleAccessToken(): Promise<string | null> {
   if (session.expiresAt - 60_000 > Date.now()) return session.accessToken;
   try {
     const data = await tokenRequest({ refresh_token: session.refreshToken, grant_type: "refresh_token" });
-    const next = { ...session, accessToken: data.access_token!, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000 };
+    const next = { ...session, accessToken: data.access_token!, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000, scope: data.scope ?? session.scope };
     await writeSession(next);
     return next.accessToken;
   } catch {

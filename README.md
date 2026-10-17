@@ -189,17 +189,41 @@ Find, crop and download images as JPG:
 
 ## Articles tab
 
-Manage SEO articles from a Google Sheets content plan and publish them to the project's WordPress site:
+Run each project's content workflow from its Google Sheets content plan, write in Google Docs, and publish to the
+project's WordPress site:
 
-- **Import** a content-plan Sheet (one row per article: title, focus keyword, a
-  link to its Google Doc, categories, tags, publish date...; columns are
-  matched by header and can be remapped) or a single Google Doc. Doc headings
-  become H2/H3 (the post title is the H1); images in the Doc are copied to the
-  project's image library. Re-importing updates an article in place.
-- **Google sign-in** (OAuth, read-only Sheets + Docs scopes) reads private
-  files the viewer can open. Tokens stay in an encrypted, httpOnly cookie in
-  that browser. Without sign-in, files shared as "Anyone with the link" still
-  work via Google's public export.
+- **Content plan (Settings → Content plan)**, set up once per project and saved:
+  - Any layout. The most plan-like tab is picked (or choose it), and the header row is found below titles and notes
+    (or choose it). Section rows such as "March" are skipped.
+  - 16 fields are matched by header name (English and Vietnamese), by what the cells link to (a column of Google
+    Docs links is the Doc column), or by **Suggest with AI** (ChatGPT reads the headers and sample values). Every
+    choice can be changed.
+  - Each status value in the plan (e.g. "Waiting for client", "Chờ duyệt") is mapped to a board stage.
+  - Without sign-in, public links read every tab and the links behind cells via Google's .xlsx export.
+- **Content board** (the tab's first view): Brief → Draft → Internal review → Client review → Approved → Published,
+  synced from the plan.
+  - Drag a card, or use its stage select, to move it. The matching status is written back to the plan; with
+    write-back off or no sign-in, the stage is kept on the board until the plan's status changes.
+  - Filters for writer, category and month, plus search, an overdue flag and a table view.
+  - "Add article" appends a row to the plan.
+  - Each card opens a panel to create its Doc, share it, import it into the editor, and keep notes and history.
+- **Google Drive**: link the project's folder (and optionally a template Doc).
+  - "Create Docs" makes one Doc per planned article in that folder: a copy of the template with `{{title}}`,
+    `{{keyword}}`, `{{writer}}`, `{{due_date}}`... filled in, or a blank Doc with a brief.
+  - Each Doc's link is written into the plan as `=HYPERLINK(...)`. A "Google Doc" column is added if the plan
+    has none.
+  - Before writing, each row is checked to still hold the article, so rows moved or inserted since the last
+    sync are never overwritten.
+  - **Share** gives the client emails comment access, by hand or automatically when a card reaches Client review.
+- **Import** plan rows or a single Doc into the editor. Doc headings become H2/H3 (the post title is the H1);
+  images in the Doc are copied to the project's image library. Re-importing updates an article in place.
+- **Google sign-in** (OAuth; Sheets, Docs and Drive scopes) reads private files, creates Docs, writes to plans
+  and shares Docs, acting only on files the signed-in viewer can edit. Tokens stay in an encrypted, httpOnly
+  cookie in that browser. Without sign-in, files shared as "Anyone with the link" can still be read and the board
+  works, but Docs aren't created and the plan isn't written to. Sign-ins from before write access existed are
+  read-only until the viewer signs in again.
+- The **sample plan** ("Try the sample plan") simulates every Google write, so the whole flow can be tried
+  without Google.
 - **Editor**: rich text (headings, lists, links, tables, images with alt text)
   or raw HTML; images come from the project library, any image link, or an
   upload.
@@ -261,7 +285,7 @@ deployer's:
 | `ANTHROPIC_API_KEY` | For Claude in Brand Mentions | - | Claude API key (console.anthropic.com). Without it, Claude answers are placeholders. |
 | `SERANKING_API_KEY` | For the SE Ranking tab | - | API key from SE Ranking (API → Dashboard). Without it, the tab shows generated data. |
 | `APP_SECRET` | For the Articles tab | - | Long random string that encrypts Google sign-in cookies and stored WordPress application passwords. Changing it signs everyone out and requires re-entering WordPress passwords. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google sign-in | - | OAuth "Web application" client with the Sheets and Docs APIs enabled. Redirect URI: `https://<your-domain>/api/google/callback`. Without them, only link-shared Sheets/Docs can be imported. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google sign-in | - | OAuth "Web application" client in a Google Cloud project with the **Sheets, Docs and Drive APIs** enabled. Consent screen: **Internal** (Workspace) avoids Google's app verification for the `spreadsheets`, `documents` and `drive` scopes. Redirect URI: `https://<your-domain>/api/google/callback`. Without them, only link-shared Sheets/Docs can be read, and Docs can't be created. |
 
 ## How it works
 

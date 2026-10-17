@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import type { ArticleSummary, PlanField, SheetPreview } from "@/lib/articles/types";
+import { PLAN_FIELDS, type ArticleSummary, type SheetPreview } from "@/lib/articles/types";
+import type { ContentPlanConfig } from "@/lib/content/types";
 import type { ProjectSummary } from "@/lib/tracking/types";
 import type { WordPressSettingsView } from "@/lib/wordpress/store";
 import { writeParams } from "@/lib/urlState";
@@ -12,9 +13,13 @@ import { ArticleEditor } from "./ArticleEditor";
 import { ArticleList } from "./ArticleList";
 import { ArticleSettings } from "./ArticleSettings";
 import { ImportDialog, type GoogleStatus } from "./ImportDialog";
+import { ContentBoard } from "@/components/content/ContentBoard";
+import { PlanSetup } from "@/components/content/PlanSetup";
+import { planValue } from "@/components/content/PlanMapper";
 import { buttonPrimary, buttonSecondary, secondaryStyle } from "./shared";
 
-type View = "list" | "settings";
+type View = "board" | "list" | "settings";
+const VIEWS: View[] = ["board", "list", "settings"];
 const PROJECT_STORAGE_KEY = "tracking.project";
 
 function readStorage(key: string): string | null {
@@ -38,11 +43,11 @@ const GOOGLE_NOTICE: Record<string, string> = {
   "not-configured": "Google sign-in isn't set up on the server yet - see Settings.",
 };
 
-/** Articles: import from Google Sheets/Docs, edit with on-page SEO help, publish to the project's WordPress. */
+/** Articles: the content board, import from Google Sheets/Docs, on-page SEO editing, publishing to WordPress. */
 export function ArticlesTab() {
   const searchParams = useSearchParams();
   const urlProject = useRef(searchParams.get("project"));
-  const [view, setView] = useState<View>(() => (searchParams.get("view") === "settings" ? "settings" : "list"));
+  const [view, setView] = useState<View>(() => VIEWS.find((v) => v === searchParams.get("view")) ?? "board");
   const [articleId, setArticleId] = useState<string | null>(() => searchParams.get("article"));
   const [importOpen, setImportOpen] = useState(() => searchParams.get("import") === "1");
   const [notice, setNotice] = useState<string | null>(() => {
@@ -56,6 +61,7 @@ export function ArticlesTab() {
   const [google, setGoogle] = useState<GoogleStatus | null>(null);
   const [wp, setWp] = useState<WordPressSettingsView | null>(null);
   const [wpLoaded, setWpLoaded] = useState(false);
+  const [plan, setPlan] = useState<ContentPlanConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadGoogle = useCallback(async () => {
@@ -86,10 +92,16 @@ export function ArticlesTab() {
     if (!projectId) return;
     let cancelled = false;
     async function load(project: string) {
-      const [, settingsRes] = await Promise.all([loadArticles(project), fetch(`/api/wordpress/settings?project=${encodeURIComponent(project)}`, { cache: "no-store" })]);
+      const [, settingsRes, contentRes] = await Promise.all([
+        loadArticles(project),
+        fetch(`/api/wordpress/settings?project=${encodeURIComponent(project)}`, { cache: "no-store" }),
+        fetch(`/api/content?project=${encodeURIComponent(project)}`, { cache: "no-store" }),
+      ]);
       const data = (await settingsRes.json().catch(() => ({}))) as { settings?: WordPressSettingsView | null };
+      const content = (await contentRes.json().catch(() => ({}))) as { config?: ContentPlanConfig | null };
       if (cancelled) return;
       setWp(data.settings ?? null);
+      setPlan(content.config ?? null);
       setWpLoaded(true);
     }
     void load(projectId);
@@ -101,7 +113,7 @@ export function ArticlesTab() {
   useEffect(() => {
     writeParams({
       project: projectId ?? undefined,
-      view: articleId ? null : view === "settings" ? "settings" : null,
+      view: articleId ? null : view === "board" ? null : view,
       article: articleId,
       import: null,
       google: null,
@@ -138,25 +150,17 @@ export function ArticlesTab() {
     if (!projectId) return;
     setError(null);
     // The same rows the sample content plan has, mapped the way the import dialog would.
-    const plan = (await (await fetch("/api/articles/sheet?url=sample")).json()) as SheetPreview;
-    const cell = (row: SheetPreview["rows"][number], field: PlanField) => (plan.mapping[field] >= 0 ? row.cells[plan.mapping[field]] : "");
+    const sample = (await (await fetch("/api/articles/sheet?url=sample")).json()) as SheetPreview;
     const res = await fetch("/api/articles/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         project: projectId,
-        items: plan.rows.map((row) => ({
+        items: sample.rows.slice(0, 10).map((row) => ({
           rowNumber: row.rowNumber,
-          sheetId: plan.spreadsheetId,
-          sheetTab: plan.tab,
-          docUrl: row.links[plan.mapping.docUrl] ?? "",
-          title: cell(row, "title"),
-          focusKeyword: cell(row, "focusKeyword"),
-          secondaryKeywords: cell(row, "secondaryKeywords"),
-          categories: cell(row, "categories"),
-          tags: cell(row, "tags"),
-          publishDate: cell(row, "publishDate"),
-          status: cell(row, "status"),
+          sheetId: sample.spreadsheetId,
+          sheetTab: sample.tab,
+          ...Object.fromEntries(PLAN_FIELDS.map((f) => [f, planValue(row, sample.mapping, f)])),
         })),
       }),
     });
@@ -181,7 +185,7 @@ export function ArticlesTab() {
               Articles
             </h2>
             <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Import from Google Sheets &amp; Docs, polish on-page SEO with ChatGPT, and publish to WordPress.
+              Run each project&apos;s content workflow from its Google Sheet plan, write in Google Docs, polish on-page SEO with ChatGPT, and publish to WordPress.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -194,6 +198,7 @@ export function ArticlesTab() {
                   setArticleId(null);
                   setItems(null);
                   setWpLoaded(false);
+                  setPlan(null);
                   setProjectId(id);
                 }}
                 onCreate={createProject}
@@ -231,6 +236,7 @@ export function ArticlesTab() {
             <Segmented
               value={view}
               options={[
+                { value: "board", label: "Content board" },
                 { value: "list", label: `Articles${items ? ` (${items.length})` : ""}` },
                 { value: "settings", label: "Settings" },
               ]}
@@ -259,15 +265,27 @@ export function ArticlesTab() {
               {error}
             </p>
           ) : null}
-          {view === "list" ? (
+          {view === "board" ? (
+            <ContentBoard
+              key={`${projectId}-${plan?.updatedAt ?? ""}`}
+              projectId={projectId}
+              google={google}
+              onSetup={() => setView("settings")}
+              onOpenArticle={setArticleId}
+              onArticlesChanged={() => void loadArticles(projectId)}
+            />
+          ) : view === "list" ? (
             <ArticleList items={items} onOpen={setArticleId} onDelete={(id) => void deleteArticle(id)} onNew={() => void newArticle()} onImport={() => setImportOpen(true)} onSample={() => void importSamples()} />
           ) : wpLoaded ? (
-            <ArticleSettings key={projectId} projectId={projectId} google={google} onGoogleChange={() => void loadGoogle()} settings={wp} onSettingsChange={setWp} />
+            <div className="flex flex-col gap-5">
+              <PlanSetup key={`plan-${projectId}`} projectId={projectId} config={plan} google={google} onSaved={(config) => setPlan(config)} />
+              <ArticleSettings key={projectId} projectId={projectId} google={google} onGoogleChange={() => void loadGoogle()} settings={wp} onSettingsChange={setWp} />
+            </div>
           ) : null}
         </>
       ) : null}
 
-      {importOpen && projectId ? <ImportDialog projectId={projectId} google={google} onClose={() => setImportOpen(false)} onImported={() => void loadArticles(projectId)} /> : null}
+      {importOpen && projectId ? <ImportDialog projectId={projectId} google={google} plan={plan} onClose={() => setImportOpen(false)} onImported={() => void loadArticles(projectId)} /> : null}
     </div>
   );
 }

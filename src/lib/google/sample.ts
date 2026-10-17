@@ -1,29 +1,36 @@
-import type { SheetPreview } from "../articles/types";
 
-/** A demo content plan + Docs, so the import → edit → publish flow can be tried before Google sign-in is set up. */
-export const SAMPLE_SHEET: Omit<SheetPreview, "mapping"> = {
-  spreadsheetId: "sample",
-  title: "Sample content plan",
-  tabs: [{ title: "Q4 articles", gid: 0 }],
-  tab: "Q4 articles",
-  via: "sample",
-  headers: ["Article title", "Focus keyword", "Secondary keywords", "Google Doc", "Category", "Tags", "Publish date", "Status"],
-  rows: [
-    {
-      rowNumber: 2,
-      cells: ["Best Beachfront Hotels in Da Nang for a First Visit", "beachfront hotels in Da Nang", "My Khe beach hotel, Da Nang resort", "Draft v2", "Travel guides", "Da Nang, beach, hotels", "2026-10-20", "Ready"],
-      links: [null, null, null, "sample:0", null, null, null, null],
-    },
-    {
-      rowNumber: 3,
-      cells: ["Hoi An Day Trip from Da Nang: A Simple Itinerary", "Hoi An day trip", "Da Nang to Hoi An, Hoi An old town", "Draft", "Itineraries", "Hoi An, day trip", "2026-10-27", "In review"],
-      links: [null, null, null, "sample:1", null, null, null, null],
-    },
-    {
-      rowNumber: 4,
-      cells: ["When to Visit Da Nang: Weather Month by Month", "best time to visit Da Nang", "Da Nang weather, Da Nang rainy season", "Draft", "Travel guides", "Da Nang, weather", "2026-11-03", "Writing"],
-      links: [null, null, null, "sample:2", null, null, null, null],
-    },
+import type { Cell, TabMatrix } from "./sheetReader";
+
+/**
+ * A demo workbook shaped like a real agency SEO plan: several tabs, the content plan not on the first one, a
+ * title and a blank row above its headers, section rows between months - so tab and header detection get tested.
+ */
+const c = (text: string, link: string | null = null): Cell => ({ text, link });
+const row = (...cells: Array<string | Cell>): Cell[] => cells.map((x) => (typeof x === "string" ? c(x) : x));
+
+const PLAN: Cell[][] = [
+  row("Content Plan 2026 - Lumen Coast Resort"),
+  [],
+  row("Month", "Topic", "Title", "Category", "Writer", "Due date", "Priority", "Action", "Content", "Status", "Publish URL"),
+  row("October 2026"),
+  row("Oct 2026", "best time to visit danang", "The Best Time to Visit Danang, Month by Month", "Travel guides", "Writer A", "2026-09-12", "TRUE", "New", c("Best time to visit Danang", "sample:2"), "Published", "https://lumencoast.example/best-time-to-visit-danang"),
+  row("Oct 2026", "danang wedding venue beach", "Planning a Beach Wedding in Danang", "Weddings", "Writer A", "2026-10-18", "TRUE", "New", c("Beach wedding Danang", "sample:0"), "Approved", ""),
+  row("Oct 2026", "family resort danang", "A Family Guide to Danang's Beaches", "Family", "Writer B", "2026-10-20", "FALSE", "Revamp", c("Family guide", "sample:1"), "Waiting for client", ""),
+  row("Oct 2026", "danang honeymoon resort", "Honeymoon in Danang: 3-Day Itinerary", "Itineraries", "Writer A", "2026-10-24", "TRUE", "New", c("Honeymoon itinerary", "sample:2"), "Internal review", ""),
+  row("November 2026"),
+  row("Nov 2026", "spa resort danang", "Spa and Wellness at Lumen Coast", "Wellness", "Writer C", "2026-10-28", "FALSE", "New", "", "Writing", ""),
+  row("Nov 2026", "danang airport to beach", "Getting from Danang Airport to the Beach", "Travel guides", "Writer B", "2026-11-04", "FALSE", "New", "", "Brief", ""),
+  row("Nov 2026", "danang seafood restaurant", "Seafood near My Khe Beach", "Food", "Writer C", "2026-11-08", "FALSE", "New", "", "", ""),
+  row("Dec 2026", "my khe beach hotel", "My Khe Beach Hotels: Where to Stay", "Travel guides", "", "2026-11-20", "TRUE", "Revamp", "", "Not started", ""),
+];
+
+export const SAMPLE_WORKBOOK: { title: string; tabs: TabMatrix[] } = {
+  title: "SEO//GEO Plan - Lumen Coast (sample)",
+  tabs: [
+    { title: "Access & Tracking Setup", gid: 0, matrix: [row("No.", "Assessment", "Detail", "Accessed"), row("1", "CMS Login", "", "TRUE"), row("2", "GA4", "", "TRUE")] },
+    { title: "1. Business Overview", gid: 11, matrix: [row("Business overview"), row("Product", "Resort", "Primary")] },
+    { title: "4. Content Plan", gid: 44, matrix: PLAN },
+    { title: "Content Audit", gid: 55, matrix: [row("No.", "Topic", "Status", "Topic's Title", "Priority", "Action"), row("1", "https://lumencoast.example/rooms", "OK", "Rooms", "FALSE", "Revamp")] },
   ],
 };
 

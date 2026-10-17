@@ -1,29 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PlanField, SheetPreview } from "@/lib/articles/types";
+import type { ContentPlanConfig } from "@/lib/content/types";
 import { Segmented, Switch } from "@/components/tracking/ui";
+import { FIELD_LABELS, MappingGrid, SheetLocator, matchedCount, planValue } from "@/components/content/PlanMapper";
 import { Field, Modal, buttonPrimary, buttonSecondary, fieldStyle, secondaryStyle } from "./shared";
 
 export interface GoogleStatus {
   configured: boolean;
   signedIn: boolean;
   email?: string;
+  /** Granted access to create Docs and edit plans (sign-ins from before that was added only read). */
+  canWrite?: boolean;
 }
 
-const FIELDS: Array<{ field: PlanField; label: string; required?: boolean }> = [
-  { field: "title", label: "Title" },
-  { field: "docUrl", label: "Google Doc link" },
-  { field: "focusKeyword", label: "Focus keyword" },
-  { field: "secondaryKeywords", label: "Secondary keywords" },
-  { field: "slug", label: "Slug" },
-  { field: "metaTitle", label: "SEO title" },
-  { field: "metaDescription", label: "Meta description" },
-  { field: "categories", label: "Categories" },
-  { field: "tags", label: "Tags" },
-  { field: "publishDate", label: "Publish date" },
-  { field: "status", label: "Status / notes" },
-];
+async function fetchPreview(url: string, tab?: string, headerRow?: number): Promise<SheetPreview> {
+  const params = new URLSearchParams({ url: url.trim(), ...(tab ? { tab } : {}), ...(headerRow ? { headerRow: String(headerRow) } : {}) });
+  const res = await fetch(`/api/articles/sheet?${params}`);
+  const data = (await res.json()) as SheetPreview & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? "Couldn't read the sheet");
+  return data;
+}
 
 type Result = { title: string; status: "created" | "updated" | "skipped" | "failed"; error?: string };
 const CHUNK = 3;
@@ -36,40 +34,59 @@ export function ImportDialog({
   projectId,
   google,
   initialUrl,
+  plan,
   onClose,
   onImported,
 }: {
   projectId: string;
   google: GoogleStatus | null;
   initialUrl?: string;
+  /** The project's saved content plan: opens on its tab with its column mapping. */
+  plan?: ContentPlanConfig | null;
   onClose: () => void;
   onImported: () => void;
 }) {
   const [mode, setMode] = useState<"sheet" | "doc">("sheet");
-  const [url, setUrl] = useState(initialUrl ?? "");
+  const [url, setUrl] = useState(initialUrl ?? plan?.sheetUrl ?? "");
   const [docUrl, setDocUrl] = useState("");
   const [preview, setPreview] = useState<SheetPreview | null>(null);
   const [mapping, setMapping] = useState<Record<PlanField, number> | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [overwrite, setOverwrite] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(!initialUrl && plan));
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadSheet(tab?: string, sheetUrl = url) {
+  const [usingSaved, setUsingSaved] = useState(false);
+
+  function apply(data: SheetPreview, saved: boolean) {
+    const map = saved && plan ? plan.mapping : data.mapping;
+    setPreview(data);
+    setMapping(map);
+    setUsingSaved(saved);
+    setSelected(new Set(data.rows.filter((r) => planValue(r, map, "title") || planValue(r, map, "docUrl")).map((r) => r.rowNumber)));
+  }
+
+  // Opens on the project's saved plan, with its tab, header row and mapping.
+  useEffect(() => {
+    if (initialUrl || !plan) return;
+    fetchPreview(plan.sheetUrl, plan.tab, plan.headerRow)
+      .then((data) => apply(data, data.tab === plan.tab))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't read the sheet"))
+      .finally(() => setLoading(false));
+    // Runs once when the dialog opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadSheet(tab?: string, sheetUrl = url, headerRow?: number) {
     setLoading(true);
     setError(null);
     setResults([]);
     try {
-      const params = new URLSearchParams({ url: sheetUrl.trim(), ...(tab ? { tab } : {}) });
-      const res = await fetch(`/api/articles/sheet?${params}`);
-      const data = (await res.json()) as SheetPreview & { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Couldn't read the sheet");
-      setPreview(data);
-      setMapping(data.mapping);
-      const cellOf = (row: SheetPreview["rows"][number], field: PlanField) => (data.mapping[field] >= 0 ? row.cells[data.mapping[field]] : "");
-      setSelected(new Set(data.rows.filter((r) => cellOf(r, "title") || cellOf(r, "docUrl")).map((r) => r.rowNumber)));
+      const data = await fetchPreview(sheetUrl, tab, headerRow);
+      // The saved mapping still applies when re-reading the saved plan's own tab and header row.
+      apply(data, Boolean(plan && plan.sheetUrl === sheetUrl.trim() && data.tab === plan.tab && data.headerRow === plan.headerRow));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't read the sheet");
     } finally {
@@ -77,12 +94,7 @@ export function ImportDialog({
     }
   }
 
-  const value = (row: SheetPreview["rows"][number], field: PlanField): string => {
-    const col = mapping?.[field] ?? -1;
-    if (col < 0) return "";
-    if (field === "docUrl") return row.links[col] ?? (/^https?:\/\//.test(row.cells[col]) || row.cells[col].startsWith("sample:") ? row.cells[col] : "");
-    return row.cells[col] ?? "";
-  };
+  const value = (row: SheetPreview["rows"][number], field: PlanField): string => (mapping ? planValue(row, mapping, field) : "");
 
   async function runImport(items: Array<Record<string, unknown>>) {
     setLoading(true);
@@ -119,7 +131,7 @@ export function ImportDialog({
         rowNumber: r.rowNumber,
         sheetId: preview.spreadsheetId,
         sheetTab: preview.tab,
-        ...Object.fromEntries(FIELDS.map(({ field }) => [field, value(r, field)])),
+        ...Object.fromEntries(FIELD_LABELS.map(({ field }) => [field, value(r, field)])),
       }))
     );
   }
@@ -204,7 +216,10 @@ export function ImportDialog({
               className="flex flex-wrap items-end gap-2"
             >
               <div className="min-w-[280px] flex-1">
-                <Field label="Content plan Sheet link" hint="One row per article with a column linking to its Google Doc. Headers like Title, Focus keyword, Doc, Category, Tags, Publish date are recognised.">
+                <Field
+                  label="Content plan Sheet link"
+                  hint="Any layout: the plan's tab, its header row and each column are detected, and you can change them below. Save a project's plan once in Settings → Content plan to skip this."
+                >
                   <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." className="rounded-lg border px-3 py-1.5 text-sm outline-none" style={fieldStyle} />
                 </Field>
               </div>
@@ -229,44 +244,20 @@ export function ImportDialog({
               <div className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center gap-3 text-xs" style={{ color: "var(--text-secondary)" }}>
                   <b style={{ color: "var(--text-primary)" }}>{preview.title}</b>
-                  {preview.tabs.length > 1 ? (
-                    <select value={preview.tab} onChange={(e) => void loadSheet(e.target.value)} className="rounded-md border px-2 py-1 text-xs" style={fieldStyle} aria-label="Sheet tab">
-                      {preview.tabs.map((t) => (
-                        <option key={t.gid} value={t.title}>
-                          {t.title}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span>{preview.tab}</span>
-                  )}
                   <span>
-                    {preview.rows.length} rows · read {preview.via === "google" ? "with your Google account" : preview.via === "public" ? "via public link (cell links not available)" : "from sample data"}
+                    {preview.rows.length} rows · read{" "}
+                    {preview.via === "google" ? "with your Google account" : preview.via === "public" ? "via public link (all tabs; sign in for private files)" : "from sample data"}
                   </span>
+                  {usingSaved ? <span style={{ color: "var(--success-text)" }}>✓ using the project&apos;s saved mapping</span> : null}
                 </div>
+                <SheetLocator preview={preview} disabled={loading} onReload={(tab, headerRow) => void loadSheet(tab, url, headerRow)} />
 
-                <details className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--border-hairline)" }} open={mapping.title < 0 && mapping.docUrl < 0}>
+                <details className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--border-hairline)" }} open={mapping.title < 0 && mapping.focusKeyword < 0}>
                   <summary className="cursor-pointer text-xs font-medium" style={{ color: "var(--text-primary)" }}>
-                    Column mapping ({FIELDS.filter((f) => mapping[f.field] >= 0).length} of {FIELDS.length} matched)
+                    Column mapping ({matchedCount(mapping)} of {FIELD_LABELS.length} fields found)
                   </summary>
-                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                    {FIELDS.map(({ field, label }) => (
-                      <Field key={field} label={label}>
-                        <select
-                          value={mapping[field]}
-                          onChange={(e) => setMapping({ ...mapping, [field]: Number(e.target.value) })}
-                          className="rounded-md border px-2 py-1 text-xs"
-                          style={fieldStyle}
-                        >
-                          <option value={-1}>(none)</option>
-                          {preview.headers.map((h, i) => (
-                            <option key={i} value={i}>
-                              {h}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                    ))}
+                  <div className="mt-3">
+                    <MappingGrid preview={preview} mapping={mapping} onChange={setMapping} />
                   </div>
                 </details>
 
@@ -278,7 +269,7 @@ export function ImportDialog({
                 </div>
 
                 <div className="max-h-[42vh] overflow-auto rounded-lg border" style={{ borderColor: "var(--border-hairline)" }}>
-                  <table className="w-full min-w-[640px] text-xs">
+                  <table className="w-full min-w-[720px] text-xs">
                     <thead className="sticky top-0" style={{ background: "var(--page-plane)" }}>
                       <tr className="text-left" style={{ color: "var(--text-muted)" }}>
                         <th className="w-8 px-2 py-2">
@@ -294,6 +285,7 @@ export function ImportDialog({
                         <th className="px-2 py-2 font-medium">Focus keyword</th>
                         <th className="px-2 py-2 font-medium">Doc</th>
                         <th className="px-2 py-2 font-medium">Publish date</th>
+                        <th className="px-2 py-2 font-medium">Status</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -335,6 +327,9 @@ export function ImportDialog({
                             </td>
                             <td className="px-2 py-1.5" style={{ color: "var(--text-secondary)" }}>
                               {value(r, "publishDate")}
+                            </td>
+                            <td className="max-w-[140px] truncate px-2 py-1.5" style={{ color: "var(--text-secondary)" }}>
+                              {value(r, "status")}
                             </td>
                           </tr>
                         );
