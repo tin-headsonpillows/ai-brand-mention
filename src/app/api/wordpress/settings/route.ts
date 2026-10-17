@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { deleteSettings, readSettings, saveSettings, type SeoPlugin } from "@/lib/wordpress/store";
 import { resolveProject } from "@/lib/tracking/store";
+import { authorize } from "@/lib/access/store";
 
 const PLUGINS: SeoPlugin[] = ["yoast", "rankmath", "none"];
 
@@ -8,12 +9,16 @@ const PLUGINS: SeoPlugin[] = ["yoast", "rankmath", "none"];
 export async function GET(req: NextRequest) {
   const projectId = await resolveProject(req.nextUrl.searchParams.get("project"));
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "viewer");
+  if (!auth.ok) return auth.response;
   return Response.json({ settings: await readSettings(projectId) });
 }
 
 export async function PUT(req: NextRequest) {
   const projectId = await resolveProject(req.nextUrl.searchParams.get("project"));
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "owner");
+  if (!auth.ok) return auth.response;
   const b = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const siteUrl = typeof b.siteUrl === "string" ? b.siteUrl : "";
   const username = typeof b.username === "string" ? b.username : "";
@@ -37,6 +42,8 @@ export async function PUT(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const projectId = await resolveProject(req.nextUrl.searchParams.get("project"));
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "owner");
+  if (!auth.ok) return auth.response;
   await deleteSettings(projectId);
   return Response.json({ ok: true });
 }

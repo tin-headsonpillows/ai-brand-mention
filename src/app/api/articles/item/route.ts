@@ -4,6 +4,7 @@ import { slugify } from "@/lib/articles/seo";
 import type { Article, ArticleImageRef, ArticleStatus, PublishMode } from "@/lib/articles/types";
 import { cleanHtml } from "@/lib/google/content";
 import { resolveProject } from "@/lib/tracking/store";
+import { authorize } from "@/lib/access/store";
 
 const STATUSES: ArticleStatus[] = ["draft", "ready", "published", "scheduled", "error"];
 const MODES: PublishMode[] = ["draft", "publish", "future"];
@@ -17,6 +18,8 @@ async function target(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const { projectId, id } = await target(req);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "viewer");
+  if (!auth.ok) return auth.response;
   const article = await readArticle(projectId, id);
   return article ? Response.json({ article }) : Response.json({ error: "Article not found" }, { status: 404 });
 }
@@ -29,13 +32,16 @@ function imageRef(v: unknown): ArticleImageRef | undefined {
   const r = (v ?? {}) as Record<string, unknown>;
   const src = str(r.src, 2000);
   if (!src || !/^(https?:\/\/|\/api\/images\/)/.test(src)) return undefined;
-  return { src, alt: str(r.alt, 300) ?? "", title: str(r.title, 300), caption: str(r.caption, 500) };
+  const wpId = Number(r.wpId);
+  return { src, alt: str(r.alt, 300) ?? "", title: str(r.title, 300), caption: str(r.caption, 500), wpId: Number.isInteger(wpId) && wpId > 0 ? wpId : undefined };
 }
 
 /** Saves the editor's fields. HTML is cleaned to article markup on the way in. */
 export async function PUT(req: NextRequest) {
   const { projectId, id } = await target(req);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   const current = await readArticle(projectId, id);
   if (!current) return Response.json({ error: "Article not found" }, { status: 404 });
   const b = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
@@ -60,6 +66,7 @@ export async function PUT(req: NextRequest) {
     },
     notes: str(b.notes, 2000) ?? current.notes,
     updatedAt: new Date().toISOString(),
+    updatedBy: auth.viewer.email ?? current.updatedBy,
   };
   await saveArticles(projectId, [next]);
   return Response.json({ article: next });
@@ -68,6 +75,8 @@ export async function PUT(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { projectId, id } = await target(req);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   await deleteArticle(projectId, id);
   return Response.json({ ok: true });
 }

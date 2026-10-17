@@ -105,6 +105,11 @@ export function ArticleList({
                 <td className="max-w-[420px] px-4 py-2.5">
                   <button type="button" onClick={() => onOpen(a.id)} className="block w-full text-left">
                     <span className="block truncate font-medium hover:underline" style={{ color: "var(--text-primary)" }}>
+                      {a.lang ? (
+                        <span className="mr-1.5 rounded border px-1 py-px text-[10px] font-semibold" style={{ borderColor: "var(--border-hairline)", color: "var(--text-secondary)" }}>
+                          {a.lang.toUpperCase()}
+                        </span>
+                      ) : null}
                       {a.title || "Untitled article"}
                     </span>
                     <span className="block truncate text-xs" style={{ color: "var(--text-muted)" }}>

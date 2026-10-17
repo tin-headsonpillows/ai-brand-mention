@@ -7,7 +7,22 @@ import Image from "@tiptap/extension-image";
 import { TableKit } from "@tiptap/extension-table";
 import { Placeholder } from "@tiptap/extensions";
 import type { ArticleImageRef } from "@/lib/articles/types";
-import { ImagePicker } from "./ImagePicker";
+import { ImagePicker, type ImagePlacement } from "./ImagePicker";
+import { ImageToolbar } from "./ImageToolbar";
+
+/** Images keep WordPress's classes (alignment, size, media id) and can be resized by dragging their corners. */
+const ArticleImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      class: {
+        default: null,
+        parseHTML: (el: HTMLElement) => el.getAttribute("class"),
+        renderHTML: (attrs: { class?: string | null }) => (attrs.class ? { class: attrs.class } : {}),
+      },
+    };
+  },
+});
 import { fieldStyle } from "./shared";
 
 /** Applies suggested alt texts to the images with matching src. */
@@ -64,12 +79,17 @@ export function RichEditor({
   projectId,
   onReady,
   focusKeyword,
+  readOnly = false,
+  wordpress = false,
 }: {
   value: string;
   onChange: (html: string) => void;
   projectId: string;
   onReady?: (editor: Editor) => void;
   focusKeyword?: string;
+  readOnly?: boolean;
+  /** WordPress is connected: the image picker offers its media library. */
+  wordpress?: boolean;
 }) {
   const [mode, setMode] = useState<"visual" | "html">("visual");
   const [picker, setPicker] = useState(false);
@@ -80,7 +100,7 @@ export function RichEditor({
     shouldRerenderOnTransaction: true,
     extensions: [
       StarterKit.configure({ heading: { levels: [2, 3, 4] }, link: { openOnClick: false, autolink: true, defaultProtocol: "https" } }),
-      Image.configure({ inline: false, allowBase64: false }),
+      ArticleImage.configure({ inline: false, allowBase64: false, resize: { enabled: true, alwaysPreserveAspectRatio: true, minWidth: 40, minHeight: 40 } }),
       TableKit.configure({ table: { resizable: false } }),
       Placeholder.configure({ placeholder: "Write the article, or import it from a Google Doc..." }),
     ],
@@ -96,6 +116,10 @@ export function RichEditor({
   useEffect(() => {
     if (editor && onReady) onReady(editor);
   }, [editor, onReady]);
+
+  useEffect(() => {
+    if (editor && editor.isEditable === readOnly) editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
 
   // Content replaced from outside (re-import, HTML mode, applied suggestion): load it without echoing back.
   useEffect(() => {
@@ -127,8 +151,12 @@ export function RichEditor({
     else editor.chain().focus().extendMarkRange("link").setLink({ href: href.trim() }).run();
   }
 
-  function insertImage(image: ArticleImageRef) {
-    editor?.chain().focus().setImage({ src: image.src, alt: image.alt, title: image.title }).run();
+  function insertImage(image: ArticleImageRef, placement?: ImagePlacement) {
+    editor
+      ?.chain()
+      .focus()
+      .insertContent({ type: "image", attrs: { src: image.src, alt: image.alt, title: image.title ?? null, width: placement?.width ?? null, height: placement?.height ?? null, class: placement?.className ?? null } })
+      .run();
   }
 
   const imageSelected = Boolean(editor?.isActive("image"));
@@ -209,6 +237,7 @@ export function RichEditor({
           <button type="button" onClick={() => editor?.chain().focus().deleteSelection().run()} className="rounded-md border px-2 py-1" style={{ borderColor: "var(--border-hairline)", color: "var(--status-critical)" }}>
             Remove image
           </button>
+          {editor ? <ImageToolbar editor={editor} projectId={projectId} wordpress={wordpress} /> : null}
         </div>
       ) : null}
 
@@ -228,7 +257,7 @@ export function RichEditor({
         />
       )}
 
-      {picker ? <ImagePicker projectId={projectId} title="Insert an image" defaultAlt={focusKeyword} onPick={insertImage} onClose={() => setPicker(false)} /> : null}
+      {picker ? <ImagePicker projectId={projectId} title="Insert an image" defaultAlt={focusKeyword} onPick={insertImage} onClose={() => setPicker(false)} wordpress={wordpress} /> : null}
     </div>
   );
 }

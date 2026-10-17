@@ -1,7 +1,7 @@
 import sanitizeHtml from "sanitize-html";
 import type { SheetPreview } from "../articles/types";
 import { docToHtml, type DocImage } from "./docs";
-import { googleAccessToken } from "./oauth";
+import { googleAccessToken, googleConfigured } from "./oauth";
 import { SAMPLE_DOCS, SAMPLE_WORKBOOK } from "./sample";
 import { pickTab, tabScore, toPreview, workbookFromXlsx, type Cell, type TabMatrix } from "./sheetReader";
 
@@ -169,7 +169,9 @@ function readSampleWorkbook(options: ReadSheetOptions): SheetPreview {
 
 const SANITIZE: sanitizeHtml.IOptions = {
   allowedTags: ["h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "ul", "ol", "li", "strong", "b", "em", "i", "u", "s", "a", "img", "blockquote", "table", "thead", "tbody", "tr", "th", "td", "figure", "figcaption", "code", "pre"],
-  allowedAttributes: { a: ["href", "title", "target", "rel"], img: ["src", "alt", "title", "width", "height"] },
+  allowedAttributes: { a: ["href", "title", "target", "rel"], img: ["src", "alt", "title", "width", "height", "class"] },
+  // WordPress image classes: alignment, the chosen size, and the media id (lets WordPress add srcset).
+  allowedClasses: { img: [/^align(none|left|center|right)$/, /^size-[\w-]+$/, /^wp-image-\d+$/] },
   allowedSchemes: ["http", "https", "mailto"],
   allowedSchemesByTag: { img: ["http", "https", "data"] },
   allowProtocolRelative: false,
@@ -198,6 +200,8 @@ export interface FetchedDoc {
   html: string;
   images: DocImage[];
   via: "google" | "public" | "sample";
+  /** When the Doc was last changed (Google API reads only), to tell later whether it changed since. */
+  modifiedTime?: string;
 }
 
 export async function readDoc(url: string): Promise<FetchedDoc> {
@@ -216,13 +220,22 @@ export async function readDoc(url: string): Promise<FetchedDoc> {
   if (!docId) throw new Error("That isn't a Google Docs link (it should contain /document/d/...)");
   const token = await googleAccessToken();
   if (token) {
-    const doc = await googleJson(`https://docs.googleapis.com/v1/documents/${docId}`, token);
+    // The Doc as it reads without pending suggestions (those are listed separately, for review).
+    const [doc, meta] = await Promise.all([
+      googleJson(`https://docs.googleapis.com/v1/documents/${docId}?suggestionsViewMode=PREVIEW_WITHOUT_SUGGESTIONS`, token),
+      googleJson(`https://www.googleapis.com/drive/v3/files/${docId}?fields=modifiedTime&supportsAllDrives=true`, token).catch(() => ({}) as Record<string, unknown>),
+    ]);
     const converted = docToHtml(doc);
-    return { docId, title: converted.title, html: cleanHtml(converted.html), images: converted.images, via: "google" };
+    const modifiedTime = typeof meta.modifiedTime === "string" ? meta.modifiedTime : undefined;
+    return { docId, title: converted.title, html: cleanHtml(converted.html), images: converted.images, via: "google", modifiedTime };
   }
   const res = await fetch(`https://docs.google.com/document/d/${docId}/export?format=html`, { redirect: "follow", signal: AbortSignal.timeout(20_000) });
   if (!res.ok || !(res.headers.get("content-type") ?? "").includes("html")) {
-    throw new Error("Couldn't read this Doc. Sign in with Google, or share it as \"Anyone with the link can view\".");
+    throw new Error(
+      googleConfigured()
+        ? "This Doc is private: sign in with Google (Articles → Settings) with an account that can open it, or share it as \"Anyone with the link can view\"."
+        : "This Doc is private, and Google sign-in isn't set up on this server yet (see Articles → Settings → Google). Until then only Docs shared as \"Anyone with the link can view\" can be read."
+    );
   }
   const raw = await res.text();
   const title = (raw.match(/<title>([\s\S]*?)<\/title>/i)?.[1] ?? "").trim();

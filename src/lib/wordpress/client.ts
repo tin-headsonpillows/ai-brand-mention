@@ -127,22 +127,78 @@ async function imageBytes(src: string): Promise<{ data: Uint8Array; contentType:
   return fetchPublicImage(src);
 }
 
-async function uploadImage(c: WordPressCredentials, src: string, meta: { alt: string; title: string; fileBase: string }) {
-  const { data, contentType } = await imageBytes(src);
+/** A WordPress media item with the sizes WordPress generated (thumbnail, medium, large... and full). */
+export interface WpMedia {
+  id: number;
+  url: string;
+  alt: string;
+  title: string;
+  width: number;
+  height: number;
+  sizes: Array<{ name: string; url: string; width: number; height: number }>;
+}
+
+function toMedia(m: Json): WpMedia {
+  const details = (m.media_details ?? {}) as Json;
+  const sizes = Object.entries((details.sizes ?? {}) as Record<string, Json>)
+    .map(([name, v]) => ({ name, url: String(v.source_url ?? ""), width: Number(v.width ?? 0), height: Number(v.height ?? 0) }))
+    .filter((v) => v.url)
+    .sort((a, b) => a.width - b.width);
+  const url = String(m.source_url ?? "");
+  const width = Number(details.width ?? 0);
+  const height = Number(details.height ?? 0);
+  if (!sizes.some((x) => x.name === "full")) sizes.push({ name: "full", url, width, height });
+  const title = (m.title ?? {}) as Json;
+  return { id: Number(m.id), url, alt: String(m.alt_text ?? ""), title: decode(String(title.rendered ?? title.raw ?? "")), width, height, sizes };
+}
+
+const MEDIA_FIELDS = "id,source_url,alt_text,title,media_details";
+
+/** Uploads image bytes to the media library (with alt text and title). */
+export async function uploadMedia(c: WordPressCredentials, data: Uint8Array, contentType: string, meta: { alt: string; title: string; fileBase: string }): Promise<WpMedia> {
   const ext = EXT[contentType];
   if (!ext) throw new Error(`WordPress doesn't accept ${contentType} images`);
-  const media = await wp(c, "/wp/v2/media", {
+  const safeBase = meta.fileBase.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "image";
+  const media = await wp(c, `/wp/v2/media?_fields=${MEDIA_FIELDS}`, {
     method: "POST",
-    headers: { "Content-Type": contentType, "Content-Disposition": `attachment; filename="${meta.fileBase}.${ext}"` },
+    headers: { "Content-Type": contentType, "Content-Disposition": `attachment; filename="${safeBase}.${ext}"` },
     body: Buffer.from(data),
   });
   const id = Number(media.id);
   if (meta.alt || meta.title) {
-    await wp(c, `/wp/v2/media/${id}`, { method: "POST", json: { alt_text: meta.alt, title: meta.title || meta.alt } }).catch(() => {
-      // Alt text is a nice-to-have; the upload itself worked.
-    });
+    const updated = await wp(c, `/wp/v2/media/${id}?_fields=${MEDIA_FIELDS}`, { method: "POST", json: { alt_text: meta.alt, title: meta.title || meta.alt } }).catch(() => null);
+    // Alt text is a nice-to-have; the upload itself worked.
+    if (updated) return toMedia(updated);
   }
-  return { id, url: String(media.source_url ?? "") };
+  return toMedia(media);
+}
+
+export async function listMedia(c: WordPressCredentials, search: string, page: number): Promise<{ items: WpMedia[]; more: boolean }> {
+  const q = new URLSearchParams({ media_type: "image", per_page: "30", page: String(Math.max(1, page)), _fields: MEDIA_FIELDS, orderby: "date", order: "desc" });
+  if (search.trim()) q.set("search", search.trim());
+  const res = await wp(c, `/wp/v2/media?${q}`);
+  const items = ((res.items as Json[]) ?? []).map(toMedia);
+  return { items, more: items.length === 30 };
+}
+
+export async function getMedia(c: WordPressCredentials, id: number): Promise<WpMedia> {
+  return toMedia(await wp(c, `/wp/v2/media/${id}?_fields=${MEDIA_FIELDS}`));
+}
+
+/** Whether an image is already on the WordPress site (so publishing doesn't upload it again). */
+export function isOnSite(c: WordPressCredentials, src: string): boolean {
+  try {
+    const host = (h: string) => h.replace(/^www\./, "").toLowerCase();
+    return host(new URL(src).hostname) === host(new URL(c.siteUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function uploadImage(c: WordPressCredentials, src: string, meta: { alt: string; title: string; fileBase: string }) {
+  const { data, contentType } = await imageBytes(src);
+  const media = await uploadMedia(c, data, contentType, meta);
+  return { id: media.id, url: media.url };
 }
 
 function seoMeta(plugin: SeoPlugin, article: Article): Record<string, string> {
@@ -174,7 +230,9 @@ export async function publishArticle(c: WordPressCredentials, article: Article, 
   const wpMedia = { ...(article.wpMedia ?? {}) };
   const slug = article.slug || "image";
   let n = 0;
-  const ensureMedia = async (src: string, alt: string) => {
+  const ensureMedia = async (src: string, alt: string, wpId?: number) => {
+    // Already in this site's media library (picked or uploaded from the editor).
+    if (wpId && isOnSite(c, src)) return { id: wpId, url: src, siteUrl: c.siteUrl };
     const cached = wpMedia[src];
     if (cached && cached.siteUrl === c.siteUrl) return cached;
     n++;
@@ -185,7 +243,7 @@ export async function publishArticle(c: WordPressCredentials, article: Article, 
 
   let content = article.contentHtml;
   for (const image of imagesIn(article.contentHtml)) {
-    if (!image.src || image.src.startsWith("data:")) continue;
+    if (!image.src || image.src.startsWith("data:") || isOnSite(c, image.src)) continue;
     try {
       const media = await ensureMedia(image.src, image.alt);
       const escaped = image.src.replace(/&/g, "&amp;");
@@ -198,7 +256,7 @@ export async function publishArticle(c: WordPressCredentials, article: Article, 
   let featuredMedia: number | undefined;
   if (article.featuredImage) {
     try {
-      featuredMedia = (await ensureMedia(article.featuredImage.src, article.featuredImage.alt)).id;
+      featuredMedia = (await ensureMedia(article.featuredImage.src, article.featuredImage.alt, article.featuredImage.wpId)).id;
     } catch (err) {
       warnings.push(`Featured image not uploaded: ${err instanceof Error ? err.message : "failed"}`);
     }

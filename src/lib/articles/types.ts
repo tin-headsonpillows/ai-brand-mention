@@ -8,16 +8,20 @@ export interface ArticleImageRef {
   alt: string;
   title?: string;
   caption?: string;
+  /** WordPress media id, when the image is already in the site's media library. */
+  wpId?: number;
 }
 
 export interface ArticleSource {
-  type: "sheet" | "doc" | "manual" | "sample";
+  type: "sheet" | "doc" | "manual" | "sample" | "translation";
   sheetId?: string;
   sheetTab?: string;
   sheetRow?: number;
   docId?: string;
   docUrl?: string;
   importedAt?: string;
+  /** The Doc's modifiedTime when it was last imported or updated from here (Google API only). */
+  docModifiedTime?: string;
 }
 
 export interface WordPressLink {
@@ -54,6 +58,14 @@ export interface Article {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  /** Google account of the last person who saved it here (when signed in). */
+  updatedBy?: string;
+  /** Language code of this article (set on translations; the source is whatever it was written in). */
+  lang?: string;
+  /** For a translation: the article it was translated from, and when / with which model. */
+  translationOf?: { id: string; at: string; model: string; untranslated: number };
+  /** For a source article: its translations, by language code -> article id. */
+  translations?: Record<string, string>;
 }
 
 /** What the article list needs, kept in the project's index. */
@@ -68,6 +80,8 @@ export interface ArticleSummary {
   wordpress?: WordPressLink;
   publish: Article["publish"];
   updatedAt: string;
+  lang?: string;
+  translationOf?: string;
 }
 
 /** One row of a content-plan sheet, mapped to article fields. */

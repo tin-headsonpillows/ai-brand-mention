@@ -6,8 +6,16 @@ import type { LibraryItem } from "@/lib/images/types";
 import { libraryFileUrl } from "@/lib/images/libraryUrl";
 import { Segmented } from "@/components/tracking/ui";
 import { Field, Modal, buttonPrimary, buttonSecondary, fieldStyle, secondaryStyle } from "./shared";
+import { WpMediaBrowser, shrinkForUpload } from "./WpMediaBrowser";
 
-type Source = "library" | "url" | "upload";
+type Source = "library" | "url" | "upload" | "wordpress";
+
+/** How a picked image is placed: a WordPress size's dimensions and classes. */
+export interface ImagePlacement {
+  width?: number;
+  height?: number;
+  className?: string;
+}
 const UPLOAD_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 /**
@@ -21,14 +29,17 @@ export function ImagePicker({
   defaultAlt,
   onPick,
   onClose,
+  wordpress = false,
 }: {
   projectId: string;
   title: string;
   defaultAlt?: string;
-  onPick: (image: ArticleImageRef) => void;
+  onPick: (image: ArticleImageRef, placement?: ImagePlacement) => void;
   onClose: () => void;
+  /** The project's WordPress is connected: offer its media library and direct uploads. */
+  wordpress?: boolean;
 }) {
-  const [source, setSource] = useState<Source>("library");
+  const [source, setSource] = useState<Source>(wordpress ? "wordpress" : "library");
   const [items, setItems] = useState<LibraryItem[] | null>(null);
   const [chosen, setChosen] = useState<{ src: string; title: string } | null>(null);
   const [url, setUrl] = useState("");
@@ -74,19 +85,16 @@ export function ImagePicker({
     }
   }
 
-  async function upload(file: File | undefined) {
-    if (!file) return;
-    if (!UPLOAD_TYPES.includes(file.type)) {
+  async function upload(picked: File | undefined) {
+    if (!picked) return;
+    if (!UPLOAD_TYPES.includes(picked.type)) {
       setError("Upload a JPG, PNG, WebP or GIF image");
-      return;
-    }
-    if (file.size > 4 * 1024 * 1024) {
-      setError("Images must be under 4 MB - resize it in the Images tab first");
       return;
     }
     setBusy(true);
     setError(null);
     try {
+      const file = await shrinkForUpload(picked);
       const dims = await new Promise<{ w: number; h: number }>((resolve) => {
         const img = new Image();
         img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
@@ -136,6 +144,7 @@ export function ImagePicker({
               { value: "library", label: `Project library${items ? ` (${items.length})` : ""}` },
               { value: "url", label: "From a link" },
               { value: "upload", label: "Upload" },
+              ...(wordpress ? [{ value: "wordpress" as const, label: "WordPress media" }] : []),
             ]}
             onChange={(v) => {
               setSource(v);
@@ -184,6 +193,18 @@ export function ImagePicker({
               })}
             </div>
           )
+        ) : source === "wordpress" ? (
+          <WpMediaBrowser
+            projectId={projectId}
+            alt={alt.trim()}
+            onPick={({ media, size }) => {
+              onPick(
+                { src: size.url, alt: alt.trim() || media.alt, title: media.title, wpId: media.id },
+                { width: size.width || undefined, height: size.height || undefined, className: `size-${size.name} wp-image-${media.id}` }
+              );
+              onClose();
+            }}
+          />
         ) : source === "url" ? (
           <div className="flex flex-col gap-3">
             <Field label="Image link" hint="A direct link to an image on any public website. It's copied into the project library.">
@@ -205,7 +226,7 @@ export function ImagePicker({
               {busy ? "Uploading..." : "Choose an image to upload"}
             </span>
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-              JPG, PNG, WebP or GIF, up to 4 MB. Saved to the project library.
+              JPG, PNG, WebP or GIF. Big photos are shrunk to fit (max 2560 px). Saved to the project library.
             </span>
             <input type="file" accept={UPLOAD_TYPES.join(",")} className="sr-only" disabled={busy} onChange={(e) => void upload(e.target.files?.[0])} />
           </label>

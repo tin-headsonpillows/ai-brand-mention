@@ -225,8 +225,41 @@ project's WordPress site:
 - The **sample plan** ("Try the sample plan") simulates every Google write, so the whole flow can be tried
   without Google.
 - **Editor**: rich text (headings, lists, links, tables, images with alt text)
-  or raw HTML; images come from the project library, any image link, or an
-  upload.
+  or raw HTML.
+  - It autosaves 2.5 s after each edit. Leaving the editor (another tab, the board, the list) saves pending edits
+    instead of dropping them.
+  - Images come from the project library, any image link, an upload, or the **WordPress media library**. Uploading
+    to WordPress returns the image's links, and you pick one of WordPress's sizes (thumbnail / medium / large /
+    full).
+  - A selected image can be resized: drag its corners, type width × height in px with the ratio locked, or pick
+    another WordPress size. It can also be aligned left, center or right, using WordPress's `alignleft` /
+    `aligncenter` / `alignright`, `size-*` and `wp-image-ID` classes, so WordPress adds srcset.
+  - Photos over the upload limit (4.5 MB on Vercel) are shrunk in the browser first.
+  - "Upload images to WordPress now" (Publish panel) uploads every body image that isn't on the site yet and
+    switches the article to the WordPress links. Publishing never re-uploads images that are already on the site.
+- **Google Doc review** (Doc review tab, needs Google sign-in):
+  - Shows the Doc's comment threads. Reply to them, resolve or reopen them, or add a comment, all under your own
+    Google account.
+  - Lists pending suggested edits. Accept or reject them in the Doc; Google's API can't.
+  - Imports always read the Doc without pending suggestions.
+  - Flags when the Doc changed since it was imported, so you know to **Re-import**.
+  - **Update Doc** writes the article back into the Doc. It refuses if the Doc changed since its last import, unless
+    you choose to overwrite. Comments stay but lose their anchor in the text; Google's version history keeps the old
+    text.
+- **Translation** ("Translate" in the editor) into Japanese, Korean, Chinese (Simplified / Traditional), Thai,
+  Russian, Vietnamese, Indonesian, French, German, Spanish, Italian or English. It runs on ChatGPT (`OPENAI_API_KEY`).
+  - Each language becomes its own article, linked to the original, with translated title, SEO title, meta
+    description, keywords and alt texts.
+  - Only the text is sent: tags become numbered placeholders, so links, classes, image sizes and tables come back
+    exactly as they were. A passage whose markup doesn't survive is retried, then kept in the original and flagged.
+  - Optionally rewrites internal links to the language's section (e.g. `/ja/`).
+  - Cost: about 1¢ per 2,000-word article per language with GPT-4.1 mini. An estimate is shown before you run it,
+    and the real cost after.
+- **Project access** (Settings), needs Google sign-in:
+  - Off by default. Turned on, only listed Google accounts can open the project's articles and content board.
+  - Roles: owner (members, WordPress settings), editor (edit, import, translate, Docs, publish), reviewer (read and
+    reply to Doc comments), viewer (read only). Every API route checks the role.
+  - Optionally gives members matching access to the project's Drive folder.
 - **On-page SEO panel**: live score and checklist (keyword in title / meta /
   slug / intro / subheadings, density, title and meta lengths, content length,
   headings, featured image, alt text, internal and outbound links), a Google

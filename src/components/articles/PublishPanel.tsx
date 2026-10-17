@@ -34,6 +34,9 @@ export function PublishPanel({
   result,
   onPublish,
   onOpenSettings,
+  onUploadImages,
+  uploadingImages = false,
+  localImages = 0,
 }: {
   projectId: string;
   draft: PublishDraft;
@@ -46,6 +49,11 @@ export function PublishPanel({
   result: { warnings: string[]; error: string | null } | null;
   onPublish: () => void;
   onOpenSettings: () => void;
+  /** Uploads the body's images to the WordPress media library now and points the article at them. */
+  onUploadImages?: () => void;
+  uploadingImages?: boolean;
+  /** Images in the body that aren't in WordPress yet. */
+  localImages?: number;
 }) {
   const [picker, setPicker] = useState(false);
   const [categoryText, setCategoryText] = useState(draft.categories.join(", "));
@@ -214,6 +222,21 @@ export function PublishPanel({
         </span>
       </div>
 
+      {connected && onUploadImages ? (
+        <div className="flex flex-col gap-1 rounded-lg border p-3 text-xs" style={{ borderColor: "var(--border-hairline)" }}>
+          <span style={{ color: "var(--text-secondary)" }}>
+            {localImages
+              ? `${localImages} image${localImages === 1 ? "" : "s"} in the body ${localImages === 1 ? "isn't" : "aren't"} in WordPress yet (publishing uploads them too).`
+              : "All body images are in the WordPress media library."}
+          </span>
+          {localImages ? (
+            <button type="button" onClick={onUploadImages} disabled={uploadingImages} className={`${buttonSecondary} self-start`} style={secondaryStyle}>
+              {uploadingImages ? "Uploading to WordPress..." : "Upload images to WordPress now"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <button
         type="button"
         onClick={onPublish}
@@ -258,6 +281,7 @@ export function PublishPanel({
           title="Featured image"
           defaultAlt={draft.featuredImage?.alt || focusKeyword}
           onPick={(image) => onChange({ featuredImage: image })}
+          wordpress={connected}
           onClose={() => setPicker(false)}
         />
       ) : null}

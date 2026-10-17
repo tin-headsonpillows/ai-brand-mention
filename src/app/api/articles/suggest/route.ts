@@ -5,6 +5,7 @@ import type { Article } from "@/lib/articles/types";
 import { listCategories } from "@/lib/wordpress/client";
 import { readCredentials } from "@/lib/wordpress/store";
 import { resolveProject } from "@/lib/tracking/store";
+import { authorize } from "@/lib/access/store";
 
 export const maxDuration = 120;
 
@@ -16,6 +17,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as { project?: unknown; id?: unknown; draft?: Partial<Article> } | null;
   const projectId = await resolveProject(typeof body?.project === "string" ? body.project : null);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   const saved = await readArticle(projectId, typeof body?.id === "string" ? body.id : "");
   if (!saved) return Response.json({ error: "Article not found" }, { status: 404 });
   const d = body?.draft ?? {};

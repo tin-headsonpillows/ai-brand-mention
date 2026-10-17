@@ -159,3 +159,24 @@ export async function shareFile(token: string, fileId: string, emails: string[],
   }
   return shared;
 }
+
+/** Gives (or changes) one person's access to a file or folder, without an email when they already had access. */
+export async function setPermission(token: string, fileId: string, email: string, role: "writer" | "commenter" | "reader"): Promise<void> {
+  const list = await google(`${DRIVE}/${fileId}/permissions?fields=permissions(id,emailAddress,role)&supportsAllDrives=true`, token);
+  const existing = ((list.permissions as Json[] | undefined) ?? []).find((p) => String(p.emailAddress ?? "").toLowerCase() === email.toLowerCase());
+  if (existing) {
+    if (existing.role === role || existing.role === "owner" || existing.role === "organizer") return;
+    await google(`${DRIVE}/${fileId}/permissions/${existing.id}?supportsAllDrives=true`, token, { method: "PATCH", body: { role } });
+    return;
+  }
+  await google(`${DRIVE}/${fileId}/permissions?supportsAllDrives=true&sendNotificationEmail=true`, token, { method: "POST", body: { type: "user", role, emailAddress: email } });
+}
+
+/** Removes one person's access to a file or folder (never the owner's). */
+export async function removePermission(token: string, fileId: string, email: string): Promise<void> {
+  const list = await google(`${DRIVE}/${fileId}/permissions?fields=permissions(id,emailAddress,role)&supportsAllDrives=true`, token);
+  const existing = ((list.permissions as Json[] | undefined) ?? []).find((p) => String(p.emailAddress ?? "").toLowerCase() === email.toLowerCase());
+  if (!existing || existing.role === "owner" || existing.role === "organizer") return;
+  const res = await fetch(`${DRIVE}/${fileId}/permissions/${existing.id}?supportsAllDrives=true`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) });
+  if (!res.ok && res.status !== 404) throw new Error(`Google API error ${res.status}`);
+}

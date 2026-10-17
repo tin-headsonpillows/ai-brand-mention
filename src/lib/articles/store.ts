@@ -23,6 +23,8 @@ export function summarize(article: Article): ArticleSummary {
     wordpress: article.wordpress,
     publish: article.publish,
     updatedAt: article.updatedAt,
+    lang: article.lang,
+    translationOf: article.translationOf?.id,
   };
 }
 

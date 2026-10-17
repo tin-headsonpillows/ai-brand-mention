@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { ContentError, createDocs, MAX_DOCS_PER_CALL } from "@/lib/content/service";
 import { resolveProject } from "@/lib/tracking/store";
+import { authorize } from "@/lib/access/store";
 
 export const maxDuration = 300;
 
@@ -9,6 +10,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as { project?: unknown; keys?: unknown } | null;
   const projectId = await resolveProject(typeof body?.project === "string" ? body.project : null);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   const keys = Array.isArray(body?.keys) ? body.keys.filter((k): k is string => typeof k === "string").slice(0, MAX_DOCS_PER_CALL) : [];
   if (!keys.length) return Response.json({ error: "Pick the articles to create Docs for." }, { status: 400 });
   try {

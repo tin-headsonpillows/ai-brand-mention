@@ -13,6 +13,8 @@ import { ArticleEditor } from "./ArticleEditor";
 import { ArticleList } from "./ArticleList";
 import { ArticleSettings } from "./ArticleSettings";
 import { ImportDialog, type GoogleStatus } from "./ImportDialog";
+import { AccessPanel, type AccessView } from "./AccessPanel";
+import { atLeast } from "@/lib/access/roles";
 import { ContentBoard } from "@/components/content/ContentBoard";
 import { PlanSetup } from "@/components/content/PlanSetup";
 import { planValue } from "@/components/content/PlanMapper";
@@ -62,6 +64,7 @@ export function ArticlesTab() {
   const [wp, setWp] = useState<WordPressSettingsView | null>(null);
   const [wpLoaded, setWpLoaded] = useState(false);
   const [plan, setPlan] = useState<ContentPlanConfig | null>(null);
+  const [access, setAccess] = useState<AccessView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadGoogle = useCallback(async () => {
@@ -92,14 +95,17 @@ export function ArticlesTab() {
     if (!projectId) return;
     let cancelled = false;
     async function load(project: string) {
-      const [, settingsRes, contentRes] = await Promise.all([
+      const [, settingsRes, contentRes, accessRes] = await Promise.all([
         loadArticles(project),
         fetch(`/api/wordpress/settings?project=${encodeURIComponent(project)}`, { cache: "no-store" }),
         fetch(`/api/content?project=${encodeURIComponent(project)}`, { cache: "no-store" }),
+        fetch(`/api/access?project=${encodeURIComponent(project)}`, { cache: "no-store" }),
       ]);
       const data = (await settingsRes.json().catch(() => ({}))) as { settings?: WordPressSettingsView | null };
       const content = (await contentRes.json().catch(() => ({}))) as { config?: ContentPlanConfig | null };
+      const accessData = (await accessRes.json().catch(() => null)) as AccessView | null;
       if (cancelled) return;
+      setAccess(accessData && "me" in accessData ? accessData : null);
       setWp(data.settings ?? null);
       setPlan(content.config ?? null);
       setWpLoaded(true);
@@ -175,6 +181,9 @@ export function ArticlesTab() {
   }
 
   const connectedHost = wp?.siteUrl ? wp.siteUrl.replace(/^https?:\/\//, "") : null;
+  const role = access?.me.role ?? (access?.enabled ? null : "owner");
+  const locked = Boolean(access?.enabled && !role);
+  const returnTo = `/articles?project=${projectId ?? ""}`;
 
   return (
     <div className="flex flex-col gap-5">
@@ -199,6 +208,7 @@ export function ArticlesTab() {
                   setItems(null);
                   setWpLoaded(false);
                   setPlan(null);
+                  setAccess(null);
                   setProjectId(id);
                 }}
                 onCreate={createProject}
@@ -217,8 +227,29 @@ export function ArticlesTab() {
         </p>
       ) : null}
 
-      {projectId && articleId ? (
+      {projectId && locked && access ? (
+        <div className="flex flex-col items-start gap-3 rounded-xl border p-6" style={{ borderColor: "var(--border-hairline)", background: "var(--surface-1)" }}>
+          <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
+            This project is limited to its members
+          </h3>
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            {!access.googleConfigured
+              ? "Google sign-in isn't set up on the server, so members can't sign in."
+              : access.me.email
+                ? `${access.me.email} isn't a member. Ask one of the project's owners to add you, or sign in with another Google account.`
+                : "Sign in with your Google account to open its articles and content board."}
+          </p>
+          {access.googleConfigured ? (
+            <a href={`/api/google/auth?returnTo=${encodeURIComponent(returnTo)}`} className={buttonPrimary} style={{ background: "var(--series-1)" }}>
+              {access.me.email ? "Use another Google account" : "Sign in with Google"}
+            </a>
+          ) : null}
+        </div>
+      ) : projectId && articleId ? (
         <ArticleEditor
+          canEdit={atLeast(role, "editor")}
+          onOpenArticle={setArticleId}
+          canReply={atLeast(role, "reviewer")}
           key={articleId}
           projectId={projectId}
           articleId={articleId}
@@ -278,6 +309,7 @@ export function ArticlesTab() {
             <ArticleList items={items} onOpen={setArticleId} onDelete={(id) => void deleteArticle(id)} onNew={() => void newArticle()} onImport={() => setImportOpen(true)} onSample={() => void importSamples()} />
           ) : wpLoaded ? (
             <div className="flex flex-col gap-5">
+              <AccessPanel key={`access-${projectId}-${access ? "loaded" : ""}`} projectId={projectId} access={access} onChange={setAccess} returnTo={`${returnTo}&view=settings`} />
               <PlanSetup key={`plan-${projectId}`} projectId={projectId} config={plan} google={google} onSaved={(config) => setPlan(config)} />
               <ArticleSettings key={projectId} projectId={projectId} google={google} onGoogleChange={() => void loadGoogle()} settings={wp} onSettingsChange={setWp} />
             </div>

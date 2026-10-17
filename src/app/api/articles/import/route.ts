@@ -7,6 +7,7 @@ import { imageSize } from "@/lib/images/imageSize";
 import { libraryFileUrl, saveManyToLibrary } from "@/lib/images/library";
 import { fetchPublicImage } from "@/lib/images/safeFetch";
 import { resolveProject } from "@/lib/tracking/store";
+import { authorize } from "@/lib/access/store";
 
 export const maxDuration = 300;
 
@@ -39,6 +40,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as { project?: unknown; items?: unknown; overwrite?: unknown } | null;
   const projectId = await resolveProject(typeof body?.project === "string" ? body.project : null);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   const items = (Array.isArray(body?.items) ? body.items : []).slice(0, MAX_ITEMS) as ImportItem[];
   if (items.length === 0) return Response.json({ error: "Nothing to import" }, { status: 400 });
   const overwrite = body?.overwrite === true;
@@ -61,6 +64,7 @@ export async function POST(req: NextRequest) {
         docId: doc?.docId,
         docUrl: docUrl || undefined,
         importedAt: new Date().toISOString(),
+        docModifiedTime: doc?.modifiedTime,
       };
       const match = existing.find(
         (a) =>

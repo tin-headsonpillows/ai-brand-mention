@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { addItem, ContentError, moveItem, removeItem, updateItem } from "@/lib/content/service";
 import { STAGES, type Stage } from "@/lib/content/types";
 import { resolveProject } from "@/lib/tracking/store";
+import { authorize } from "@/lib/access/store";
 
 export const maxDuration = 60;
 
@@ -21,6 +22,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const projectId = await project(body);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   const title = str(body?.title, 300);
   if (!title) return Response.json({ error: "Give the article a title." }, { status: 400 });
   try {
@@ -37,11 +40,13 @@ export async function PATCH(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const projectId = await project(body);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   const key = str(body?.key, 100);
   try {
     if (typeof body?.stage === "string") {
       if (!STAGE_IDS.has(body.stage)) return Response.json({ error: "Unknown stage" }, { status: 400 });
-      return Response.json(await moveItem(projectId, key, body.stage as Stage));
+      return Response.json(await moveItem(projectId, key, body.stage as Stage, auth.viewer.email ?? "board"));
     }
     const item = await updateItem(projectId, key, {
       notes: typeof body?.notes === "string" ? body.notes : undefined,
@@ -58,6 +63,8 @@ export async function DELETE(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const projectId = await project(body);
   if (!projectId) return Response.json({ error: "Unknown project" }, { status: 404 });
+  const auth = await authorize(projectId, "editor");
+  if (!auth.ok) return auth.response;
   try {
     await removeItem(projectId, str(body?.key, 100));
     return Response.json({ ok: true });
