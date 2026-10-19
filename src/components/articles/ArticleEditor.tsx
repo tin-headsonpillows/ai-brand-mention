@@ -8,6 +8,8 @@ import type { WordPressSettingsView } from "@/lib/wordpress/store";
 import { Segmented } from "@/components/tracking/ui";
 import { PublishPanel, type PublishDraft } from "./PublishPanel";
 import { ReviewPanel } from "./ReviewPanel";
+import { PushDialog, type PushPreview } from "./PushDialog";
+import type { SyncSummary } from "@/lib/google/docSync";
 import { TranslateDialog } from "./TranslateDialog";
 import { languageLabel } from "@/lib/articles/languages";
 import { RichEditor, appendHeading, applyAltTexts } from "./RichEditor";
@@ -68,6 +70,8 @@ export function ArticleEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [panel, setPanel] = useState<"seo" | "publish" | "review">("seo");
   const [pushing, setPushing] = useState(false);
+  const [pushPreview, setPushPreview] = useState<PushPreview | null>(null);
+  const [pushError, setPushError] = useState<string | null>(null);
   const [docChanged, setDocChanged] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
@@ -333,9 +337,9 @@ export function ArticleEditor({
     }
   }
 
-  async function pushToDoc(force = false) {
+  /** Step 1 of "Update Doc": ask the server what would change, without writing anything. */
+  async function previewPush() {
     if (!article?.source.docUrl) return;
-    if (!force && !window.confirm("Replace the Google Doc's text with this article?\n\nComments stay in the Doc but lose their place in the text, and pending suggested edits are dropped. Google keeps the old text in the Doc's version history.")) return;
     setPushing(true);
     setSaveError(null);
     try {
@@ -343,19 +347,40 @@ export function ArticleEditor({
       const res = await fetch("/api/articles/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: projectId, id: articleId, force }),
+        body: JSON.stringify({ project: projectId, id: articleId, dryRun: true }),
       });
-      const data = (await res.json().catch(() => ({}))) as { article?: Article; simulated?: boolean; conflict?: boolean; error?: string };
-      if (res.status === 409 && data.conflict) {
-        if (window.confirm(`${data.error}\n\nOverwrite the Doc anyway?`)) return void (await pushToDoc(true));
-        return;
-      }
+      const data = (await res.json().catch(() => ({}))) as { summary?: SyncSummary; conflict?: string | null; simulated?: boolean; error?: string };
+      if (!res.ok || !data.summary) throw new Error(data.error ?? "Couldn't read the Doc");
+      setPushError(null);
+      setPushPreview({ summary: data.summary, conflict: data.conflict ?? null, simulated: data.simulated });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Couldn't update the Doc");
+    } finally {
+      setPushing(false);
+    }
+  }
+
+  /** Step 2: make exactly the changes that were shown. */
+  async function confirmPush() {
+    if (!pushPreview) return;
+    setPushing(true);
+    setPushError(null);
+    try {
+      const res = await fetch("/api/articles/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: projectId, id: articleId, force: Boolean(pushPreview.conflict) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { article?: Article; summary?: SyncSummary; simulated?: boolean; error?: string };
       if (!res.ok || !data.article) throw new Error(data.error ?? "Couldn't update the Doc");
       setArticle(data.article);
       setDocChanged(false);
-      setNotice(data.simulated ? "Sample article: the Doc update is simulated." : "The Google Doc now has this article's text.");
+      setPushPreview(null);
+      const m = data.summary;
+      const parts = m ? [m.edits.length && `${m.edits.length} edited`, m.added.length && `${m.added.length} added`, m.removed.length && `${m.removed.length} removed`, (m.headings || m.marks) && "formatting synced"].filter(Boolean) : [];
+      setNotice(data.simulated ? "Sample article: the Doc update is simulated." : `The Google Doc was updated in place${parts.length ? ` (${parts.join(", ")})` : ""}. Its formatting and comments were kept.`);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Couldn't update the Doc");
+      setPushError(err instanceof Error ? err.message : "Couldn't update the Doc");
     } finally {
       setPushing(false);
     }
@@ -442,8 +467,8 @@ export function ArticleEditor({
               >
                 {reimporting ? "Re-importing..." : docChanged ? "Re-import Doc (changed)" : "Re-import Doc"}
               </button>
-              <button type="button" onClick={() => void pushToDoc()} disabled={pushing} className={buttonSecondary} style={secondaryStyle} title="Write this article into the Google Doc">
-                {pushing ? "Updating Doc..." : "Update Doc"}
+              <button type="button" onClick={() => void previewPush()} disabled={pushing} className={buttonSecondary} style={secondaryStyle} title="Apply this article's edits to the Google Doc, in place (you see the changes first)">
+                {pushing && !pushPreview ? "Checking the Doc..." : "Update Doc"}
               </button>
             </>
           ) : null}
@@ -463,6 +488,20 @@ export function ArticleEditor({
           )}
         </div>
       </div>
+
+      {pushPreview ? (
+        <PushDialog
+          preview={pushPreview}
+          busy={pushing}
+          error={pushError}
+          onConfirm={() => void confirmPush()}
+          onReimport={() => {
+            setPushPreview(null);
+            void reimport();
+          }}
+          onClose={() => setPushPreview(null)}
+        />
+      ) : null}
 
       {translating ? (
         <TranslateDialog
@@ -536,7 +575,7 @@ export function ArticleEditor({
               canReply={canReply}
               canEdit={canEdit}
               onReimport={() => void reimport()}
-              onPush={() => void pushToDoc()}
+              onPush={() => void previewPush()}
               pushing={pushing}
               onChangedState={setDocChanged}
             />

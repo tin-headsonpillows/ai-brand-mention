@@ -243,9 +243,21 @@ project's WordPress site:
   - Lists pending suggested edits. Accept or reject them in the Doc; Google's API can't.
   - Imports always read the Doc without pending suggestions.
   - Flags when the Doc changed since it was imported, so you know to **Re-import**.
-  - **Update Doc** writes the article back into the Doc. It refuses if the Doc changed since its last import, unless
-    you choose to overwrite. Comments stay but lose their anchor in the text; Google's version history keeps the old
-    text.
+  - **Update Doc** applies the article's edits to the Doc **in place**. It never replaces the Doc or creates a
+    new file.
+    - Both are cut into paragraphs and paired up, and only the words that differ are changed (Docs API
+      `insertText` / `deleteContentRange`). New text takes the formatting of its neighbours.
+    - Paragraphs you added or removed are inserted or deleted, then headings and bold / italic / underline /
+      links are synced.
+    - Everything else stays as it is: template styling (shaded cells, fonts, colours, spacing), page setup,
+      comments with their anchors and the version history.
+    - A preview lists every change first (nothing is written until you confirm), and the batch is atomic with a
+      revision check, so if someone edits the Doc meanwhile Google refuses it and nothing changes.
+    - It refuses when the Doc has pending suggested edits (accept or reject them first) or no longer lines up
+      with the article (re-import first).
+    - If the Doc was edited after the last import, the preview says so and offers to re-import first.
+    - Not synced (reported in the preview): images, smart chips, list-to-paragraph changes, and table structure
+      (new rows, columns or tables).
 - **Translation** ("Translate" in the editor) into Japanese, Korean, Chinese (Simplified / Traditional), Thai,
   Russian, Vietnamese, Indonesian, French, German, Spanish, Italian or English. It runs on ChatGPT (`OPENAI_API_KEY`).
   - Each language becomes its own article, linked to the original, with translated title, SEO title, meta

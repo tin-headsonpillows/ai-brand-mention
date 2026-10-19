@@ -141,7 +141,7 @@ export function ReviewPanel({
             <button type="button" onClick={onReimport} className={buttonSecondary} style={secondaryStyle}>
               Re-import from Doc
             </button>
-            <button type="button" onClick={onPush} disabled={pushing || !review.doc.canEdit} className={buttonSecondary} style={secondaryStyle} title="Replace the Doc's text with this article">
+            <button type="button" onClick={onPush} disabled={pushing || !review.doc.canEdit} className={buttonSecondary} style={secondaryStyle} title="Apply this article's edits to the Doc, in place">
               {pushing ? "Updating Doc..." : "Update Doc from here"}
             </button>
           </div>

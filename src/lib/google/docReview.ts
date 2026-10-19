@@ -1,6 +1,8 @@
+import type { DocClient } from "./docSync";
+
 /**
  * The review side of an article's Google Doc: comment threads (read, reply, resolve, add), pending suggested
- * edits, and replacing the Doc's text with the article edited here. Calls use the signed-in viewer's token, so
+ * edits, and the Docs API client used to write the article back. Calls use the signed-in viewer's token, so
  * replies appear under their own Google name and only Docs they can open are reachable.
  */
 
@@ -9,13 +11,10 @@ const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(
 const arr = (v: unknown): Json[] => (Array.isArray(v) ? (v as Json[]) : []);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
-async function google(url: string, token: string, init: { method?: string; body?: unknown; raw?: { contentType: string; data: string } } = {}): Promise<Json> {
+async function google(url: string, token: string, init: { method?: string; body?: unknown } = {}): Promise<Json> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   let body: string | undefined;
-  if (init.raw) {
-    headers["Content-Type"] = init.raw.contentType;
-    body = init.raw.data;
-  } else if (init.body !== undefined) {
+  if (init.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(init.body);
   }
@@ -178,22 +177,16 @@ export function suggestionsIn(doc: Json): ReviewSuggestion[] {
     .filter((s) => s.inserted.trim() || s.deleted.trim() || s.kind === "format");
 }
 
-/**
- * Replaces the Doc's content with the article (Drive converts the HTML into the Doc). Comments stay in the Doc
- * but lose their place in the text, and pending suggestions are dropped; Google keeps the old version in the
- * Doc's version history.
- */
-export async function replaceDocContent(token: string, fileId: string, html: string): Promise<string> {
-  const data = await google(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=modifiedTime&supportsAllDrives=true`, token, {
-    method: "PATCH",
-    raw: { contentType: "text/html; charset=UTF-8", data: html },
-  });
-  return str(data.modifiedTime);
-}
-
-/** The article as a Doc: title as Heading 1 (read back as the title on import), images with absolute links. */
-export function articleToDocHtml(title: string, contentHtml: string, origin: string): string {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const body = contentHtml.replace(/(<img[^>]*\ssrc=")(\/[^"]+)"/g, (_, before: string, path: string) => `${before}${origin}${path}"`);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title></head><body><h1>${esc(title)}</h1>\n${body}</body></html>`;
+/** The Docs API for one Doc, as docSync needs it. Reads include pending suggestions so they can be detected. */
+export function googleDocClient(token: string, docId: string): DocClient {
+  return {
+    get: () => google(`https://docs.googleapis.com/v1/documents/${docId}?suggestionsViewMode=SUGGESTIONS_INLINE`, token),
+    // One atomic batch; requiredRevisionId makes Google refuse it if someone edited the Doc since it was read.
+    batchUpdate: async (requests, revisionId) => {
+      await google(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, token, {
+        method: "POST",
+        body: { requests, ...(revisionId ? { writeControl: { requiredRevisionId: revisionId } } : {}) },
+      });
+    },
+  };
 }
