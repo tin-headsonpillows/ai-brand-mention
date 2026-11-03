@@ -95,6 +95,49 @@ export async function seGet<T = unknown>(path: string, params: Record<string, Pa
   throw lastError ?? new SeRankingError(0, "SE Ranking request failed");
 }
 
+/** POST a JSON body to an SE Ranking endpoint (Data API, e.g. keywords/export). Same rate limit and retries as seGet. */
+export async function sePost<T = unknown>(path: string, params: Record<string, ParamValue>, body: unknown): Promise<T> {
+  const key = seRankingKey();
+  if (!key) throw new SeRankingError(401, "SE Ranking API key is not configured");
+  const url = `${BASE_URL}${path}${buildQuery(params)}`;
+  let lastError: SeRankingError | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await rateSlot();
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Token ${key}`, Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(TIMEOUT_MS * 2),
+        cache: "no-store",
+      });
+    } catch (err) {
+      lastError = new SeRankingError(0, err instanceof Error && err.name === "TimeoutError" ? "SE Ranking did not respond in time" : "Could not reach SE Ranking");
+      await new Promise((r) => setTimeout(r, 800 * 2 ** attempt));
+      continue;
+    }
+    const text = await res.text();
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = null;
+    }
+    if (res.ok) return parsed as T;
+    const message =
+      (parsed && typeof parsed === "object" && typeof (parsed as { message?: unknown }).message === "string" && (parsed as { message: string }).message) ||
+      `HTTP ${res.status}`;
+    lastError = new SeRankingError(res.status, `SE Ranking ${path}: ${message}`.slice(0, 300));
+    if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+      continue;
+    }
+    throw lastError;
+  }
+  throw lastError ?? new SeRankingError(0, "SE Ranking request failed");
+}
+
 /** List responses come as a bare array, or wrapped in `data` / `items`. */
 export function asList<T = Record<string, unknown>>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];

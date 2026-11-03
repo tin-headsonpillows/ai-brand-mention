@@ -88,6 +88,53 @@ stay under the function time limit. Without a server OpenAI key the analysis
 falls back to a keyword method. Without SerpApi keys the reviews are
 simulated.
 
+## Brand Knowledge Base tab
+
+The starting point of every project: what the team knows about the brand before writing prompts. It uses the same
+projects (brand, website, competitors, country / language) as Google Search Tracking. **Run research** goes through
+four steps. Each is its own request, so each stays inside a serverless time limit:
+
+1. **Website**: reads the homepage plus the pages that best describe the business (about, products, services,
+   pricing, FAQ...) from its links and XML sitemap, then runs AI-readiness checks:
+   - access for 13 AI crawlers in robots.txt (OpenAI, Perplexity, Anthropic, Google, Microsoft, Apple, Common Crawl;
+     search crawlers apart from training crawlers);
+   - sitemap, llms.txt and HTTPS;
+   - Organization / business and Product / Service / FAQ schema, and sameAs profiles;
+   - meta descriptions, H1s, and text readable without JavaScript.
+2. **Google (brand)**: SerpApi searches `<brand>`, `site:<domain>` and `<brand> reviews`, plus autocomplete. Results
+   are classified as own site, review / directory, social, competitor or community; the step also records the
+   knowledge panel and indexed pages.
+3. **ChatGPT profile** (`OPENAI_MODEL`): category, offerings with the proof points the site states, personas (pain
+   points, what they compare, what they'd ask AI), differentiators marked explicit or self-claimed, typed competitors,
+   and questions to confirm with the client. It counts towards the Brand Mentions daily spending limit.
+4. **Google (demand)**: People also ask, related searches and autocomplete for the category and each offering, i.e.
+   the real buyer queries.
+
+The team can answer the client questions in the page, and each answer is also logged as a project note. Notes for
+calls and decisions are added there too. Everything is stored in Blob at `knowledge/<project>.json`.
+
+## Keyword Research tab
+
+Follows the SEO workflow **taxonomy → live SERP intent → country-level volume validation → clustering → URL mapping →
+prioritisation**:
+
+1. **Taxonomy**: ChatGPT builds sub-categories and seed keywords from the knowledge base and its real Google
+   queries. Branded queries are left out, since Brand Mentions covers those.
+2. **Live SERP intent**: SerpApi checks the highest-volume keywords (20-150, chosen in the page; 8 per request).
+   Each check records SERP features (AI Overview, People also ask, local pack, shopping, ads, videos...), the top 10,
+   and the brand's and competitors' ranks. Intent comes from the wording, SE Ranking's intent codes and those features.
+3. **Volume**: SE Ranking's Keyword Research API (`keywords/export`, 100 credits per 1,000 keywords, for the
+   project's country) when `SERANKING_API_KEY` is set. Or upload any keyword-tool export with keyword and volume
+   columns, from Google Keyword Planner (including its "1K – 10K" ranges), SE Ranking, Ahrefs or Semrush.
+4. **Clustering**: keywords that share 3 or more top-10 URLs form one cluster.
+5. **URL mapping**: each cluster maps to the brand page that already ranks, the closest page found in the knowledge
+   base crawl, or a suggested new page.
+6. **Prioritisation**: clusters are scored on volume, intent value and the ranking gap, with a boost when AI
+   Overviews show, then graded P1 / P2 / P3.
+
+Stored in Blob at `keywords/<project>.json`. Without OpenAI, SerpApi or SE Ranking keys, each step uses sample data,
+like the rest of the app.
+
 ## Brand Mentions tab
 
 Tracks how AI answer engines talk about the project's brand for a set of prompts (questions people ask AI), next
@@ -328,7 +375,7 @@ deployer's:
 | `BLOB_READ_WRITE_TOKEN` | For tracking & reviews | - | Vercel Blob store that holds tracking history and fetched reviews. |
 | `LOCAL_BLOB_DIR` | No | - | Local development only: store those JSON documents in this folder instead of Vercel Blob. |
 | `ANTHROPIC_API_KEY` | For Claude in Brand Mentions | - | Claude API key (console.anthropic.com). Without it, Claude answers are placeholders. |
-| `SERANKING_API_KEY` | For the SE Ranking tab | - | API key from SE Ranking (API → Dashboard). Without it, the tab shows generated data. |
+| `SERANKING_API_KEY` | For the SE Ranking tab and keyword volumes | - | API key from SE Ranking (API → Dashboard). Without it, the SE Ranking tab shows generated data and Keyword Research uses sample volumes (or an uploaded file). |
 | `APP_SECRET` | For the Articles tab | - | Long random string that encrypts Google sign-in cookies and stored WordPress application passwords. Changing it signs everyone out and requires re-entering WordPress passwords. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | For Google sign-in | - | OAuth "Web application" client in a Google Cloud project with the **Sheets, Docs and Drive APIs** enabled. Consent screen: **Internal** (Workspace) avoids Google's app verification for the `spreadsheets`, `documents` and `drive` scopes. Redirect URI: `https://<your-domain>/api/google/callback`. Without them, only link-shared Sheets/Docs can be read, and Docs can't be created. |
 
