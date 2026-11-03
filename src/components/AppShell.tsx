@@ -6,6 +6,8 @@ import type { ReactNode } from "react";
 
 export const TABS = [
   { href: "/google-search-tracking", label: "Google Search Tracking", wide: true },
+  { href: "/knowledge-base", label: "Brand Knowledge Base", wide: true },
+  { href: "/keyword-research", label: "Keyword Research", wide: true },
   { href: "/brand-mentions", label: "Brand Mentions", wide: true },
   { href: "/se-ranking", label: "SE Ranking", wide: true },
   { href: "/chatgpt-mentions", label: "ChatGPT Mentions", wide: false },
